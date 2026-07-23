@@ -24,7 +24,12 @@ from codeautopsy.accounts.security import create_session_token
 from codeautopsy.accounts.store import AccountStore, AccountStoreProtocol, EmailAlreadyRegistered
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.provenance.indexer import resolve as resolve_provenance
-from codeautopsy.provenance.models import ProvenanceRecord, ResolveRequest, ResolveResponse
+from codeautopsy.provenance.models import (
+    IncidentRecord,
+    ProvenanceRecord,
+    ResolveRequest,
+    ResolveResponse,
+)
 from codeautopsy.provenance.store import ProvenanceStore, ProvenanceStoreProtocol
 
 # Public demo: the sandbox page (GitHub Pages) calls this service directly from the browser.
@@ -161,15 +166,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/v1/resolve", response_model=ResolveResponse)
     def v1_resolve(req: ResolveRequest, org_id: str = Depends(require_api_key)) -> ResolveResponse:
-        return resolve_provenance(store, req, repo=settings.target_repo, org_id=org_id)
+        resp = resolve_provenance(store, req, repo=settings.target_repo, org_id=org_id)
+        store.add_incident(
+            IncidentRecord(
+                org_id=org_id,
+                commit_sha=req.commit_sha,
+                file_path=req.file_path,
+                line=req.line,
+                exc_type=req.exc_type,
+                exc_message=req.exc_message,
+                resolved=resp.resolved,
+                decision_id=resp.record.decision_id if resp.record else None,
+                blast_radius=req.blast_radius,
+            )
+        )
+        return resp
 
     @app.get("/v1/dashboard")
     def v1_dashboard(ctx=Depends(require_user)) -> dict:
         decisions = store.all(org_id=ctx.org_id)
+        incidents = store.list_incidents(org_id=ctx.org_id)
         return {
             "org_id": ctx.org_id,
             "decision_count": len(decisions),
             "decisions": decisions,
+            "incident_count": len(incidents),
+            "resolved_incident_count": sum(1 for i in incidents if i.resolved),
+            "incidents": incidents,
         }
 
     @app.delete("/v1/provenance/{decision_id}")

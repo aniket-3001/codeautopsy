@@ -265,6 +265,7 @@ async function renderOnboarding() {
 async function renderDashboard() {
   const data = await api("/v1/dashboard", { headers: authHeaders() });
   const decisions = data.decisions || [];
+  const incidents = data.incidents || [];
   document.getElementById("main").innerHTML = `
     <h1 class="serif text-3xl">Dashboard</h1>
     <p class="mono mt-1 text-xs text-zinc-400">org · ${esc(data.org_id)}</p>
@@ -292,6 +293,36 @@ async function renderDashboard() {
               <p class="mt-2 text-sm">${esc(d.reasoning_summary)}</p>
               <div class="mt-2 flex flex-wrap gap-1.5">
                 ${(d.risk_flags || []).map(f => `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}</span>`).join("")}
+              </div>
+            </div>`)
+          .join("")}
+      </div>`}
+
+    <h2 class="serif mt-10 text-xl">Incidents</h2>
+    <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div class="card !p-4"><div class="mono text-2xl">${incidents.length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">incidents seen</div></div>
+      <div class="card !p-4"><div class="mono text-2xl">${data.resolved_incident_count ?? incidents.filter(i => i.resolved).length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">resolved to a decision</div></div>
+    </div>
+
+    ${incidents.length === 0 ? `
+      <div class="card mt-4 text-center">
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">No incidents yet. When your instrumented app crashes and calls /v1/resolve, it'll show up here.</p>
+      </div>` : `
+      <div class="mt-4 grid gap-3">
+        ${incidents
+          .slice()
+          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+          .map((i) => `
+            <div class="card !p-4">
+              <div class="flex items-center justify-between">
+                <span class="mono text-xs text-zinc-400">${esc((i.commit_sha || "").slice(0, 8))} · ${esc(i.file_path)}:${i.line}</span>
+                <span class="mono text-[11px] text-zinc-400">${fmtDate(i.created_at)}</span>
+              </div>
+              <p class="mt-2 text-sm">${esc(i.exc_type)}${i.exc_type && i.exc_message ? ": " : ""}${esc(i.exc_message)}</p>
+              <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                <span class="mono rounded-full border px-2 py-0.5 text-[11px] ${i.resolved ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300" : "border-zinc-400/40 bg-zinc-400/10 text-zinc-500 dark:text-zinc-400"}">${i.resolved ? "resolved" : "unresolved"}</span>
+                ${i.decision_id ? `<span class="mono text-[11px] text-zinc-400">${esc(i.decision_id)}</span>` : ""}
+                ${i.blast_radius > 1 ? `<span class="mono text-[11px] text-zinc-400">blast radius ${i.blast_radius}</span>` : ""}
               </div>
             </div>`)
           .join("")}

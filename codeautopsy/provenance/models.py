@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _incident_id() -> str:
+    return f"inc_{uuid4().hex[:12]}"
 
 
 class ProvenanceRecord(BaseModel):
@@ -43,6 +48,11 @@ class ResolveRequest(BaseModel):
     commit_sha: str
     file_path: str
     line: int
+    # Optional crash context — when present, /v1/resolve persists an IncidentRecord so the
+    # calling org sees this resolution on their dashboard, not just in the response.
+    exc_type: str = ""
+    exc_message: str = ""
+    blast_radius: int = 1
 
 
 class ResolveResponse(BaseModel):
@@ -56,3 +66,23 @@ class ResolveResponse(BaseModel):
     # hex-encoded, so a caller can deep-link straight into that trace in SigNoz.
     crash_trace_id: str | None = None
     crash_span_id: str | None = None
+
+
+class IncidentRecord(BaseModel):
+    """One row: a runtime crash and whether it resolved to an AI decision.
+
+    Powers the dashboard's incident timeline (ARCHITECTURE.md §5) — the record that a signed-up
+    org actually sees on /v1/dashboard when their instrumented app crashes and calls /v1/resolve.
+    """
+
+    org_id: str = "demo-public"
+    incident_id: str = Field(default_factory=_incident_id)
+    commit_sha: str
+    file_path: str
+    line: int
+    exc_type: str = ""
+    exc_message: str = ""
+    resolved: bool = False
+    decision_id: str | None = None
+    blast_radius: int = 1
+    created_at: str = Field(default_factory=_now)

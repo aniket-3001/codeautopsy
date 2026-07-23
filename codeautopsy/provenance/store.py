@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 
-from codeautopsy.provenance.models import ProvenanceRecord
+from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord
 
 
 class ProvenanceStoreProtocol(Protocol):
@@ -27,6 +27,8 @@ class ProvenanceStoreProtocol(Protocol):
     def all(self, org_id: str = "demo-public") -> list[ProvenanceRecord]: ...
     def count(self, org_id: str | None = None) -> int: ...
     def delete(self, decision_id: str, org_id: str | None = None) -> int: ...
+    def add_incident(self, incident: IncidentRecord) -> None: ...
+    def list_incidents(self, org_id: str = "demo-public") -> list[IncidentRecord]: ...
 
 
 _SCHEMA = """
@@ -47,6 +49,21 @@ CREATE TABLE IF NOT EXISTS provenance (
     created_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_file ON provenance(file_path);
+
+CREATE TABLE IF NOT EXISTS incidents (
+    org_id       TEXT NOT NULL DEFAULT 'demo-public',
+    incident_id  TEXT NOT NULL,
+    commit_sha   TEXT NOT NULL,
+    file_path    TEXT NOT NULL,
+    line         INTEGER NOT NULL,
+    exc_type     TEXT NOT NULL DEFAULT '',
+    exc_message  TEXT NOT NULL DEFAULT '',
+    resolved     INTEGER NOT NULL DEFAULT 0,
+    decision_id  TEXT,
+    blast_radius INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, created_at);
 """
 
 
@@ -168,3 +185,35 @@ class ProvenanceStore:
                     (decision_id, org_id),
                 )
             return cur.rowcount
+
+    # --- incidents ------------------------------------------------------------------
+    def add_incident(self, incident: IncidentRecord) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO incidents (
+                    org_id, incident_id, commit_sha, file_path, line,
+                    exc_type, exc_message, resolved, decision_id, blast_radius, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    incident.org_id,
+                    incident.incident_id,
+                    incident.commit_sha,
+                    incident.file_path,
+                    incident.line,
+                    incident.exc_type,
+                    incident.exc_message,
+                    int(incident.resolved),
+                    incident.decision_id,
+                    incident.blast_radius,
+                    incident.created_at,
+                ),
+            )
+
+    def list_incidents(self, org_id: str = "demo-public") -> list[IncidentRecord]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM incidents WHERE org_id = ? ORDER BY created_at", (org_id,)
+            ).fetchall()
+        return [IncidentRecord(**{**dict(r), "resolved": bool(dict(r)["resolved"])}) for r in rows]

@@ -136,7 +136,14 @@ def test_ingest_resolve_and_dashboard_round_trip(tmp_path: Path):
 
     r = client.post(
         "/v1/resolve",
-        json={"commit_sha": "abc123", "file_path": "app/payment.py", "line": 42},
+        json={
+            "commit_sha": "abc123",
+            "file_path": "app/payment.py",
+            "line": 42,
+            "exc_type": "ValueError",
+            "exc_message": "invalid literal for int()",
+            "blast_radius": 3,
+        },
         headers={"X-Api-Key": api_key},
     )
     assert r.status_code == 200
@@ -144,8 +151,68 @@ def test_ingest_resolve_and_dashboard_round_trip(tmp_path: Path):
 
     r = client.get("/v1/dashboard", headers=_auth_headers(token))
     assert r.status_code == 200
-    assert r.json()["decision_count"] == 1
-    assert r.json()["decisions"][0]["decision_id"] == "dec_7f3a"
+    body = r.json()
+    assert body["decision_count"] == 1
+    assert body["decisions"][0]["decision_id"] == "dec_7f3a"
+    assert body["incident_count"] == 1
+    assert body["resolved_incident_count"] == 1
+    incident = body["incidents"][0]
+    assert incident["exc_type"] == "ValueError"
+    assert incident["resolved"] is True
+    assert incident["decision_id"] == "dec_7f3a"
+    assert incident["blast_radius"] == 3
+
+
+def test_resolve_records_unresolved_incident_when_no_decision_matches(tmp_path: Path):
+    client = _client(tmp_path)
+    token = _signup(client, "dev@example.com")["access_token"]
+    api_key = client.post("/v1/keys", headers=_auth_headers(token)).json()["key"]
+
+    r = client.post(
+        "/v1/resolve",
+        json={
+            "commit_sha": "nomatch",
+            "file_path": "app/nowhere.py",
+            "line": 1,
+            "exc_type": "KeyError",
+        },
+        headers={"X-Api-Key": api_key},
+    )
+    assert r.status_code == 200
+    assert r.json()["resolved"] is False
+
+    dash = client.get("/v1/dashboard", headers=_auth_headers(token)).json()
+    assert dash["incident_count"] == 1
+    assert dash["resolved_incident_count"] == 0
+    assert dash["incidents"][0]["resolved"] is False
+    assert dash["incidents"][0]["decision_id"] is None
+
+
+def test_two_orgs_cannot_see_each_others_incidents(tmp_path: Path):
+    client = _client(tmp_path)
+
+    token_a = _signup(client, "inc-a@example.com")["access_token"]
+    key_a = client.post("/v1/keys", headers=_auth_headers(token_a)).json()["key"]
+
+    token_b = _signup(client, "inc-b@example.com")["access_token"]
+    key_b = client.post("/v1/keys", headers=_auth_headers(token_b)).json()["key"]
+
+    client.post(
+        "/v1/resolve",
+        json={"commit_sha": "abc123", "file_path": "app/payment.py", "line": 42},
+        headers={"X-Api-Key": key_a},
+    )
+    client.post(
+        "/v1/resolve",
+        json={"commit_sha": "abc123", "file_path": "app/payment.py", "line": 42},
+        headers={"X-Api-Key": key_b},
+    )
+
+    dash_a = client.get("/v1/dashboard", headers=_auth_headers(token_a)).json()
+    assert dash_a["incident_count"] == 1
+
+    dash_b = client.get("/v1/dashboard", headers=_auth_headers(token_b)).json()
+    assert dash_b["incident_count"] == 1
 
 
 def test_ingest_bulk_scopes_every_record_to_the_authenticated_org(tmp_path: Path):

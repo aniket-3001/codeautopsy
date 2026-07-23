@@ -10,11 +10,16 @@ import json
 
 import psycopg
 
-from codeautopsy.provenance.models import ProvenanceRecord
+from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord
 
 _COLUMNS = (
     "org_id, commit_sha, file_path, line_start, line_end, decision_span_id, decision_trace_id, "
     "session_id, reasoning_summary, risk_flags, model, tool, decision_id, created_at"
+)
+
+_INCIDENT_COLUMNS = (
+    "org_id, incident_id, commit_sha, file_path, line, exc_type, exc_message, resolved, "
+    "decision_id, blast_radius, created_at"
 )
 
 _SCHEMA = """
@@ -35,6 +40,21 @@ CREATE TABLE IF NOT EXISTS provenance (
     created_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_file ON provenance(file_path);
+
+CREATE TABLE IF NOT EXISTS incidents (
+    org_id       TEXT NOT NULL DEFAULT 'demo-public',
+    incident_id  TEXT NOT NULL,
+    commit_sha   TEXT NOT NULL,
+    file_path    TEXT NOT NULL,
+    line         INTEGER NOT NULL,
+    exc_type     TEXT NOT NULL DEFAULT '',
+    exc_message  TEXT NOT NULL DEFAULT '',
+    resolved     BOOLEAN NOT NULL DEFAULT FALSE,
+    decision_id  TEXT,
+    blast_radius INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, created_at);
 """
 
 
@@ -146,3 +166,37 @@ class PostgresProvenanceStore:
                     (decision_id, org_id),
                 )
             return cur.rowcount
+
+    # --- incidents ------------------------------------------------------------------
+    def add_incident(self, incident: IncidentRecord) -> None:
+        with psycopg.connect(self.dsn) as conn:
+            conn.execute(
+                f"""
+                INSERT INTO incidents ({_INCIDENT_COLUMNS})
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    incident.org_id,
+                    incident.incident_id,
+                    incident.commit_sha,
+                    incident.file_path,
+                    incident.line,
+                    incident.exc_type,
+                    incident.exc_message,
+                    incident.resolved,
+                    incident.decision_id,
+                    incident.blast_radius,
+                    incident.created_at,
+                ),
+            )
+
+    def list_incidents(self, org_id: str = "demo-public") -> list[IncidentRecord]:
+        with psycopg.connect(self.dsn) as conn:
+            cur = conn.execute(
+                f"SELECT {_INCIDENT_COLUMNS} FROM incidents WHERE org_id = %s ORDER BY created_at",
+                (org_id,),
+            )
+            assert cur.description is not None
+            columns = [d.name for d in cur.description]
+            rows = cur.fetchall()
+        return [IncidentRecord(**dict(zip(columns, r, strict=True))) for r in rows]
