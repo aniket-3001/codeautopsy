@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeAutopsy — dashboard</title>
+<meta name="description" content="Sign up, get an API key, and see your own org's decisions and incidents — the real hosted CodeAutopsy dashboard, not a scripted demo.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2.4' stroke-linecap='round'><path d='M4 12h6'/><path d='M14 12h6'/><circle cx='11' cy='12' r='2' fill='%2322d3ee' stroke='none'/><circle cx='17' cy='6' r='2' fill='%236366f1' stroke='none'/><path d='M13 10.5 15.5 7.5' stroke='%236366f1'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --color-zinc-50:#f5f7fa; --color-zinc-100:#eef1f6; --color-zinc-200:#e0e5ee; --color-zinc-300:#cbd3e1;
+    --color-zinc-400:#93a0b5; --color-zinc-500:#64718a; --color-zinc-600:#475066; --color-zinc-700:#353d50;
+    --color-zinc-800:#222838; --color-zinc-900:#161b28; --color-zinc-950:#0d1119;
+  }
+  body{font-family:'Geist',system-ui,sans-serif}
+  .serif{font-family:'Instrument Serif','Spectral',Georgia,serif;font-weight:400}
+  .mono{font-family:'Geist Mono',ui-monospace,monospace}
+  a:focus-visible,button:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:5px}
+  .grad{background:linear-gradient(90deg,#0891b2,#4f46e5);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+  .dark .grad{background:linear-gradient(90deg,#22d3ee,#6366f1);-webkit-background-clip:text;background-clip:text}
+  .bg-grid{background-image:radial-gradient(rgba(100,116,139,.13) 1px,transparent 1px);background-size:26px 26px}
+  .dark .bg-grid{background-image:radial-gradient(rgba(148,163,184,.07) 1px,transparent 1px)}
+  textarea,input,select{background:transparent}
+  .card{border-radius:1rem;border-width:1px;border-color:var(--color-zinc-300);background:rgb(255 255 255 / .6);backdrop-filter:blur(8px);padding:1.5rem}
+  .dark .card{border-color:var(--color-zinc-800);background:rgb(11 16 24 / .6)}
+</style>
+</head>
+<body class="bg-[#f6f8fc] text-slate-900 antialiased dark:bg-[#0a0e1a] dark:text-slate-100">
+<div aria-hidden="true" class="bg-grid fixed inset-0 -z-10"></div>
+
+<header class="sticky top-0 z-20 border-b border-zinc-300/70 bg-[#f4f7fc]/80 backdrop-blur dark:border-zinc-900 dark:bg-[#0a0e1a]/75">
+  <div class="mx-auto flex max-w-4xl items-center justify-between px-5 py-3.5">
+    <a href="index.html" class="flex items-center gap-2">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h6" stroke="#6366f1" stroke-width="2.4" stroke-linecap="round"/><path d="M14 12h6" stroke="#22d3ee" stroke-width="2.4" stroke-linecap="round"/><circle cx="11" cy="12" r="2.1" fill="#6366f1"/><circle cx="17" cy="6" r="2.1" fill="#22d3ee"/></svg>
+      <span class="serif text-xl leading-none tracking-tight">CodeAutopsy</span>
+    </a>
+    <nav id="nav" class="flex items-center gap-4 text-sm font-medium text-zinc-500 dark:text-zinc-400"></nav>
+  </div>
+</header>
+
+<main id="main" class="mx-auto max-w-3xl px-5 py-14"></main>
+
+<footer class="border-t border-zinc-300/70 px-5 py-10 text-center text-xs text-zinc-400 dark:border-zinc-900 dark:text-zinc-600">
+  <p>Built for the WeMakeDevs × SigNoz hackathon — Track 3 · Agents of SigNoz.</p>
+</footer>
+
+<script>
+const API = "https://codeautopsy-provenance-3bczbiamba-uc.a.run.app";
+
+// --- tiny auth-state helpers -------------------------------------------------------------
+function getToken() { return localStorage.getItem("ca_token"); }
+function getEmail() { return localStorage.getItem("ca_email") || ""; }
+function setSession(token, email) {
+  localStorage.setItem("ca_token", token);
+  localStorage.setItem("ca_email", email);
+}
+function clearSession() {
+  localStorage.removeItem("ca_token");
+  localStorage.removeItem("ca_email");
+}
+function authHeaders() { return { Authorization: "Bearer " + getToken() }; }
+
+async function api(path, opts) {
+  opts = opts || {};
+  const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  const r = await fetch(API + path, {
+    method: opts.method || "GET",
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : opts.rawBody,
+  });
+  let data = null;
+  try { data = await r.json(); } catch (e) { /* empty body */ }
+  if (!r.ok) {
+    if (r.status === 401) clearSession();
+    const detail = (data && data.detail) ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : ("HTTP " + r.status);
+    throw new Error(detail);
+  }
+  return data;
+}
+
+function hex(n) {
+  let s = "";
+  while (s.length < n) s += Math.floor(Math.random() * 16).toString(16);
+  return s.slice(0, n);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function fmtDate(iso) {
+  try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+}
+
+// --- router -------------------------------------------------------------------------------
+const PROTECTED = ["#/dashboard", "#/onboarding", "#/settings"];
+
+function navigate(hash) { location.hash = hash; }
+
+async function render() {
+  let hash = location.hash || "#/";
+  if (PROTECTED.includes(hash) && !getToken()) hash = "#/login";
+  if ((hash === "#/login" || hash === "#/signup") && getToken()) hash = "#/dashboard";
+  if (hash === "#/") hash = getToken() ? "#/dashboard" : "#/home";
+
+  renderNav();
+  const main = document.getElementById("main");
+  main.innerHTML = '<p class="mono text-sm text-zinc-400">loading…</p>';
+
+  try {
+    if (hash === "#/home") return renderHome();
+    if (hash === "#/signup") return renderAuthForm("signup");
+    if (hash === "#/login") return renderAuthForm("login");
+    if (hash === "#/onboarding") return await renderOnboarding();
+    if (hash === "#/dashboard") return await renderDashboard();
+    if (hash === "#/settings") return await renderSettings();
+    main.innerHTML = '<p class="text-sm text-zinc-500">Not found.</p>';
+  } catch (err) {
+    main.innerHTML = `<div class="card border-red-400/40"><p class="text-sm text-red-500">${esc(err.message)}</p></div>`;
+  }
+}
+
+function renderNav() {
+  const nav = document.getElementById("nav");
+  if (getToken()) {
+    nav.innerHTML = `
+      <a href="#/dashboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Dashboard</a>
+      <a href="#/settings" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Settings</a>
+      <span class="mono hidden text-xs text-zinc-400 sm:inline">${esc(getEmail())}</span>
+      <button id="btn-logout" class="rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Log out</button>`;
+    document.getElementById("btn-logout").addEventListener("click", () => { clearSession(); navigate("#/home"); });
+  } else {
+    nav.innerHTML = `
+      <a href="#/login" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Log in</a>
+      <a href="#/signup" class="rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Sign up</a>`;
+  }
+}
+
+// --- views --------------------------------------------------------------------------------
+
+function renderHome() {
+  document.getElementById("main").innerHTML = `
+    <div class="text-center">
+      <h1 class="serif text-4xl leading-tight sm:text-5xl">Your own <span class="grad italic">CodeAutopsy</span> org.</h1>
+      <p class="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">Sign up, get an API key, and start indexing decisions — isolated from every other org on this instance.</p>
+      <div class="mt-8 flex justify-center gap-3">
+        <a href="#/signup" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-cyan-500/20">Sign up →</a>
+        <a href="#/login" class="rounded-xl border border-zinc-300 px-6 py-3 text-sm font-medium text-zinc-700 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900">Log in</a>
+      </div>
+    </div>`;
+}
+
+function renderAuthForm(mode) {
+  const isSignup = mode === "signup";
+  document.getElementById("main").innerHTML = `
+    <div class="mx-auto max-w-sm">
+      <h1 class="serif text-center text-3xl">${isSignup ? "Create your org" : "Welcome back"}</h1>
+      <p class="mt-2 text-center text-sm text-zinc-500 dark:text-zinc-400">${isSignup ? "One user, one org, isolated from day one." : "Log in to your dashboard."}</p>
+      <form id="auth-form" class="card mt-8 grid gap-3">
+        <label class="block">
+          <span class="mono text-[11px] uppercase tracking-wider text-zinc-400">email</span>
+          <input required type="email" id="in-email" class="mt-1 w-full rounded-lg border border-zinc-300 p-2.5 text-sm dark:border-zinc-700" placeholder="you@example.com">
+        </label>
+        <label class="block">
+          <span class="mono text-[11px] uppercase tracking-wider text-zinc-400">password</span>
+          <input required type="password" minlength="8" id="in-password" class="mt-1 w-full rounded-lg border border-zinc-300 p-2.5 text-sm dark:border-zinc-700" placeholder="at least 8 characters">
+        </label>
+        <button type="submit" id="btn-submit" class="mono mt-2 rounded-xl bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200">${isSignup ? "Sign up" : "Log in"}</button>
+        <p id="auth-error" class="hidden text-sm text-red-500"></p>
+      </form>
+      <p class="mt-4 text-center text-sm text-zinc-500 dark:text-zinc-400">
+        ${isSignup ? `Already have an account? <a href="#/login" class="text-cyan-600 dark:text-cyan-400">Log in</a>` : `Need an org? <a href="#/signup" class="text-cyan-600 dark:text-cyan-400">Sign up</a>`}
+      </p>
+    </div>`;
+
+  document.getElementById("auth-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("btn-submit");
+    const errEl = document.getElementById("auth-error");
+    errEl.classList.add("hidden");
+    btn.disabled = true;
+    const email = document.getElementById("in-email").value.trim();
+    const password = document.getElementById("in-password").value;
+    try {
+      const data = await api(isSignup ? "/v1/auth/signup" : "/v1/auth/login", {
+        method: "POST",
+        body: { email, password },
+      });
+      setSession(data.access_token, email);
+      navigate(isSignup ? "#/onboarding" : "#/dashboard");
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove("hidden");
+      btn.disabled = false;
+    }
+  });
+}
+
+async function renderOnboarding() {
+  const existingKeys = await api("/v1/keys", { headers: authHeaders() });
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <div class="mx-auto max-w-xl">
+      <h1 class="serif text-3xl">Get your API key</h1>
+      <p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">This is what the Recorder/Enricher use to ingest decisions into your org. Shown once — copy it now.</p>
+      <div class="card mt-6">
+        ${existingKeys.length
+          ? `<p class="mono text-xs text-zinc-400">you already have ${existingKeys.length} key(s) — see Settings to manage them.</p>
+             <button id="btn-gen" class="mono mt-4 rounded-xl bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Generate another key</button>`
+          : `<button id="btn-gen" class="mono rounded-xl bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Generate my API key</button>`}
+        <div id="key-out" class="mt-4 hidden">
+          <p class="mono text-[11px] uppercase tracking-wider text-amber-500">save this now — it will not be shown again</p>
+          <pre id="key-value" class="mono mt-1.5 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs dark:border-zinc-800 dark:bg-black/40"></pre>
+          <button id="btn-copy" class="mono mt-2 text-xs text-cyan-600 dark:text-cyan-400">Copy to clipboard</button>
+        </div>
+      </div>
+      <div id="snippet-wrap" class="card mt-4 ${existingKeys.length ? "" : "hidden"}">
+        <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">ingest a decision</p>
+        <pre id="snippet" class="mono mt-2 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs leading-6 dark:border-zinc-800 dark:bg-black/40"></pre>
+      </div>
+      <a href="#/dashboard" class="mono mt-6 inline-block text-sm text-cyan-600 dark:text-cyan-400">Continue to dashboard →</a>
+    </div>`;
+
+  function showSnippet(key) {
+    const snippet = `curl -X POST ${API}/v1/provenance \\
+  -H "X-Api-Key: ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "commit_sha": "<git-sha>",
+    "file_path": "app/payment.py",
+    "line_start": 40,
+    "line_end": 45,
+    "decision_span_id": "${hex(16)}",
+    "decision_trace_id": "${hex(32)}",
+    "session_id": "sess_1",
+    "reasoning_summary": "assuming the input is always valid",
+    "risk_flags": ["assumed_valid_input"],
+    "decision_id": "dec_${hex(8)}"
+  }'`;
+    document.getElementById("snippet-wrap").classList.remove("hidden");
+    document.getElementById("snippet").textContent = snippet;
+  }
+
+  document.getElementById("btn-gen").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    try {
+      const created = await api("/v1/keys", { method: "POST", headers: authHeaders(), rawBody: "" });
+      document.getElementById("key-out").classList.remove("hidden");
+      document.getElementById("key-value").textContent = created.key;
+      document.getElementById("btn-copy").addEventListener("click", () => {
+        navigator.clipboard.writeText(created.key);
+      });
+      showSnippet(created.key);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+}
+
+async function renderDashboard() {
+  const data = await api("/v1/dashboard", { headers: authHeaders() });
+  const decisions = data.decisions || [];
+  document.getElementById("main").innerHTML = `
+    <h1 class="serif text-3xl">Dashboard</h1>
+    <p class="mono mt-1 text-xs text-zinc-400">org · ${esc(data.org_id)}</p>
+    <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div class="card !p-4"><div class="mono text-2xl">${decisions.length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">decisions indexed</div></div>
+      <div class="card !p-4"><div class="mono text-2xl">${new Set(decisions.map(d => d.commit_sha)).size}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">commits covered</div></div>
+      <div class="card !p-4"><div class="mono text-2xl">${decisions.reduce((n, d) => n + (d.risk_flags || []).length, 0)}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">risk flags raised</div></div>
+    </div>
+
+    ${decisions.length === 0 ? `
+      <div class="card mt-8 text-center">
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">No decisions yet. Ingest one with your API key to see it appear here.</p>
+        <a href="#/onboarding" class="mono mt-3 inline-block text-sm text-cyan-600 dark:text-cyan-400">Get your API key →</a>
+      </div>` : `
+      <div class="mt-8 grid gap-3">
+        ${decisions
+          .slice()
+          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+          .map((d) => `
+            <div class="card !p-4">
+              <div class="flex items-center justify-between">
+                <span class="mono text-xs text-zinc-400">${esc((d.commit_sha || "").slice(0, 8))} · ${esc(d.file_path)}:${d.line_start}-${d.line_end}</span>
+                <span class="mono text-[11px] text-zinc-400">${fmtDate(d.created_at)}</span>
+              </div>
+              <p class="mt-2 text-sm">${esc(d.reasoning_summary)}</p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                ${(d.risk_flags || []).map(f => `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}</span>`).join("")}
+              </div>
+            </div>`)
+          .join("")}
+      </div>`}
+  `;
+}
+
+async function renderSettings() {
+  const [me, keys] = await Promise.all([
+    api("/v1/me", { headers: authHeaders() }),
+    api("/v1/keys", { headers: authHeaders() }),
+  ]);
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <h1 class="serif text-3xl">Settings</h1>
+
+    <div class="card mt-6">
+      <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">org</p>
+      <p class="mt-1 text-sm">${esc(me.org.name)}</p>
+      <p class="mono mt-1 text-xs text-zinc-400">${esc(me.org.id)}</p>
+      <p class="mono mt-3 text-[11px] uppercase tracking-wider text-zinc-400">signed in as</p>
+      <p class="mt-1 text-sm">${esc(me.user.email)}</p>
+    </div>
+
+    <div class="card mt-4">
+      <div class="flex items-center justify-between">
+        <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">API keys</p>
+        <button id="btn-new-key" class="mono rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">+ New key</button>
+      </div>
+      <div id="key-created" class="mt-3 hidden rounded-xl border border-amber-400/40 bg-amber-400/10 p-3">
+        <p class="mono text-[11px] text-amber-600 dark:text-amber-300">save this now — it will not be shown again</p>
+        <pre id="key-created-value" class="mono mt-1 overflow-x-auto text-xs"></pre>
+      </div>
+      <div id="key-list" class="mt-3 grid gap-2"></div>
+    </div>
+  `;
+
+  function renderKeyList(list) {
+    const el = document.getElementById("key-list");
+    if (!list.length) {
+      el.innerHTML = `<p class="text-sm text-zinc-500 dark:text-zinc-400">No keys yet.</p>`;
+      return;
+    }
+    el.innerHTML = list.map((k) => `
+      <div class="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+        <div>
+          <span class="mono text-sm">ca_live_${esc(k.prefix)}…</span>
+          <span class="mono block text-[11px] text-zinc-400">created ${fmtDate(k.created_at)}${k.last_used_at ? " · last used " + fmtDate(k.last_used_at) : " · never used"}</span>
+        </div>
+        <button data-id="${esc(k.id)}" class="btn-revoke mono text-xs text-red-500 hover:text-red-600">Revoke</button>
+      </div>`).join("");
+    el.querySelectorAll(".btn-revoke").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        await api("/v1/keys/" + btn.dataset.id, { method: "DELETE", headers: authHeaders() });
+        renderSettings();
+      });
+    });
+  }
+
+  renderKeyList(keys);
+
+  document.getElementById("btn-new-key").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    try {
+      const created = await api("/v1/keys", { method: "POST", headers: authHeaders(), rawBody: "" });
+      document.getElementById("key-created").classList.remove("hidden");
+      document.getElementById("key-created-value").textContent = created.key;
+      renderKeyList(await api("/v1/keys", { headers: authHeaders() }));
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+}
+
+window.addEventListener("hashchange", render);
+render();
+</script>
+</body>
+</html>
