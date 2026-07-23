@@ -5,6 +5,22 @@
 > and use on their own codebase.** It is the source of truth we build against. Every milestone
 > below has a concrete "done" definition so progress is unambiguous across sessions.
 
+> ## ⚠️ Demo-first scope (read this first)
+>
+> This is being built as a **hackathon demo**, not a commercial operation. The goal is a website
+> that **feels like a real SaaS anyone can sign up for and use** — not a company with billing,
+> legal, and support. So we split the roadmap in two:
+>
+> - **Build for the demo:** **M1 (accounts + tenancy + isolation)** + **M2 (real dashboard)** +
+>   **the "money shot"** (a live crash resolving to its AI decision, shown in the dashboard and
+>   deep-linked into SigNoz). Together these turn "scripted demo of one bug" into "a real product
+>   a stranger can sign up for and use live."
+> - **Roadmap slide only (not built):** M3 (PyPI), M4 (GitHub OAuth/App), M6 (billing),
+>   M7 (RLS/SOC2). Business plumbing — shown as vision, not implemented.
+>
+> The open questions in §10 are resolved with **demo-optimized defaults** — no custom domain,
+> the existing SigNoz Cloud, no billing, per-org isolation is enough, no residency constraints.
+
 ---
 
 ## 0. Where we are today (honest current state)
@@ -269,7 +285,9 @@ Mostly what exists, extended:
 
 ## 9. Milestone roadmap
 
-Each milestone is independently shippable and leaves `main` deployable.
+Each milestone is independently shippable and leaves `main` deployable. **For the demo we build
+M0–M2 + the money shot; M3–M7 are the commercial roadmap (shown as vision, not implemented) —
+see the Demo-first scope callout at the top.**
 
 ### ✅ M0 — Foundation (done)
 Single-tenant spine, persistent Postgres, live on Cloud Run, CI/CD, landing + scripted demo.
@@ -288,31 +306,34 @@ secret in Secret Manager; deploy.
 **Done when:** a stranger can sign up in the browser, get a key, and see their own (initially
 empty) dashboard — no curl required.
 
-### M3 — Distributable recorder + edge blame *(makes it usable on real repos)*
+### M3 — Distributable recorder + edge blame *(roadmap slide — not built for the demo)*
 **Build:** publish `codeautopsy` to PyPI; configure Recorder/Enricher via `CODEAUTOPSY_API_KEY` +
 `CODEAUTOPSY_API_URL`; move blame to the edge (Enricher resolves introducing commit locally,
 sends identifiers only); onboarding docs.
 **Done when:** an external repo (not this one) can `pip install codeautopsy`, wire in with its
 key, and resolve its own seeded crash against the hosted API — proving the loop for anyone.
 
-### M4 — GitHub integration
+### M4 — GitHub integration *(roadmap slide — not built for the demo)*
 **Build:** GitHub OAuth login; GitHub App to connect a repo; optional server-side blame; Fix Bot
 opens PRs into the connected repo.
 **Done when:** a user logs in with GitHub, connects a repo, and a resolved crash yields a Fix Bot
 PR in that repo.
 
-### M5 — SigNoz-native experience
-**Build:** guided OTel wiring for the customer runtime; dashboard deep-links into the customer's
-SigNoz traces; render the crash→decision span link in-product.
-**Done when:** from a dashboard incident, one click lands on the exact linked trace in the
-customer's SigNoz.
+### M5 — SigNoz-native experience *(the "money shot" — a thin slice IS built for the demo)*
+**Build for the demo (thin slice):** from a dashboard incident, deep-link into the SigNoz trace
+showing the crash→decision span link. This is the demo's climax and uses the SigNoz Cloud we
+already have.
+**Full milestone (roadmap):** guided OTel wiring for the customer runtime; render the span link
+in-product.
+**Done when (demo):** from a dashboard incident, one click lands on the exact linked trace in
+SigNoz.
 
-### M6 — Billing & plans
+### M6 — Billing & plans *(roadmap slide — not built for the demo)*
 **Build:** Stripe; usage metering (decisions indexed / resolutions); plan tiers + quota
 enforcement.
 **Done when:** a paid plan can be purchased and quotas are enforced.
 
-### M7 — Hardening & scale
+### M7 — Hardening & scale *(roadmap slide — not built for the demo)*
 **Build:** Postgres Row-Level Security; rate limiting; audit logs; secret rotation; backups/DR;
 security review. 
 **Done when:** isolation is enforced at the database layer (not just the app), and a security
@@ -327,16 +348,15 @@ checklist passes.
 - **D2** 1 user = 1 org at signup; schema supports teams from day one.
 - **D3** Email/password first; GitHub OAuth in M4.
 
-**Open questions to settle before / during the relevant milestone:**
-1. **Domain & branding** — do we have/want a custom domain (e.g. `codeautopsy.dev`)? Affects M2
-   hosting and M4 OAuth callback URLs.
-2. **SigNoz relationship** — is the target a customer's *own* SigNoz (self-host/cloud) only, or do
-   we also offer a bundled SigNoz? Affects M5.
-3. **Pricing shape** — usage-based vs seat-based vs hybrid. Affects M6 metering design.
-4. **Recorder trust model** — decisions are self-reported by the customer's own tooling; do we
-   need any signing/verification, or is per-org isolation sufficient? Affects M1/M3.
-5. **Data residency / retention** — any region or retention constraints for stored provenance?
-   Affects M1 schema + M7.
+**Open questions — resolved with demo-optimized defaults** (this is a demo, not a business; each
+can be revisited if the project ever goes commercial):
+1. **Domain & branding** → **No custom domain.** Free `github.io` + Cloud Run URLs.
+2. **SigNoz relationship** → **The existing SigNoz Cloud** already validated (the `in2` region).
+   No bundled SigNoz.
+3. **Pricing shape** → **No billing.** M6 is cut from the build. Fake plan tiers may appear as UI
+   dressing only.
+4. **Recorder trust model** → **Per-org isolation is sufficient.** No decision signing.
+5. **Data residency / retention** → **None.** No region or retention constraints.
 
 ---
 
