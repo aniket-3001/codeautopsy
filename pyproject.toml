@@ -6,6 +6,18 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "CodeAutopsy" }]
+keywords = ["observability", "opentelemetry", "ai-agents", "provenance", "signoz", "debugging"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: System :: Monitoring",
+]
 
 dependencies = [
     "fastapi>=0.110",
@@ -33,6 +45,11 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
+
+[project.urls]
+Homepage = "https://aniket-3001.github.io/codeautopsy/"
+Repository = "https://github.com/aniket-3001/codeautopsy"
+Issues = "https://github.com/aniket-3001/codeautopsy/issues"
 
 [project.scripts]
 codeautopsy = "codeautopsy.cli.main:app"
