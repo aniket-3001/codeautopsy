@@ -15,8 +15,8 @@
 >   **the "money shot"** (a live crash resolving to its AI decision, shown in the dashboard and
 >   deep-linked into SigNoz). Together these turn "scripted demo of one bug" into "a real product
 >   a stranger can sign up for and use live."
-> - **Roadmap slide only (not built):** M3 (PyPI), M4 (GitHub OAuth/App), M6 (billing),
->   M7 (RLS/SOC2). Business plumbing — shown as vision, not implemented.
+> - **Roadmap slide only (not built):** M3 (PyPI), M4 (GitHub OAuth/App), M7 (RLS/SOC2).
+>   Business plumbing — shown as vision, not implemented.
 >
 > The open questions in §10 are resolved with **demo-optimized defaults** — no custom domain,
 > the existing SigNoz Cloud, no billing, per-org isolation is enough, no residency constraints.
@@ -286,7 +286,7 @@ Mostly what exists, extended:
 ## 9. Milestone roadmap
 
 Each milestone is independently shippable and leaves `main` deployable. **For the demo we build
-M0–M2 + the money shot; M3–M7 are the commercial roadmap (shown as vision, not implemented) —
+M0–M2 + the money shot; M3–M4, M7 are the commercial roadmap (shown as vision, not implemented) —
 see the Demo-first scope callout at the top.**
 
 ### ✅ M0 — Foundation (done)
@@ -328,11 +328,6 @@ in-product.
 **Done when (demo):** from a dashboard incident, one click lands on the exact linked trace in
 SigNoz.
 
-### M6 — Billing & plans *(roadmap slide — not built for the demo)*
-**Build:** Stripe; usage metering (decisions indexed / resolutions); plan tiers + quota
-enforcement.
-**Done when:** a paid plan can be purchased and quotas are enforced.
-
 ### M7 — Hardening & scale *(roadmap slide — not built for the demo)*
 **Build:** Postgres Row-Level Security; rate limiting; audit logs; secret rotation; backups/DR;
 security review. 
@@ -353,8 +348,8 @@ can be revisited if the project ever goes commercial):
 1. **Domain & branding** → **No custom domain.** Free `github.io` + Cloud Run URLs.
 2. **SigNoz relationship** → **The existing SigNoz Cloud** already validated (the `in2` region).
    No bundled SigNoz.
-3. **Pricing shape** → **No billing.** M6 is cut from the build. Fake plan tiers may appear as UI
-   dressing only.
+3. **Pricing shape** → **No billing.** This is a hackathon demo, not a paid product — no plan
+   tiers, fake or otherwise.
 4. **Recorder trust model** → **Per-org isolation is sufficient.** No decision signing.
 5. **Data residency / retention** → **None.** No region or retention constraints.
 
