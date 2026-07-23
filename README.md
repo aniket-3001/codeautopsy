@@ -32,7 +32,16 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 - ✅ **Day-0 validated:** span-link click navigates across traces/services in SigNoz Cloud
   (`scripts/day0_smoke.py`). The core thesis is proven on real infrastructure.
 - ✅ Provenance store + git-blame join engine + resolve API (`codeautopsy/provenance/`).
-- 🚧 Recorder (Claude Code hooks), Sample app + Autopsy enricher, Coroner CLI, Fix bot.
+- ✅ Recorder — real Claude Code `PostToolUse` hook (`codeautopsy-hook`, wired via
+  `.claude/settings.json`), risk-flag detection, commit indexer.
+- ✅ Sample app (checkout-api with a seeded bug) + Autopsy Enricher (mints the linked
+  `codeautopsy.autopsy` span) + incident log for reproduction context.
+- ✅ Coroner CLI — `codeautopsy autopsy`, `index-commit`, `status`.
+- ✅ Fix Bot — `codeautopsy fix <commit> <file> <line>`: feeds the agent its own genealogy,
+  verifies the patch with a real regression test before committing anything, opens a PR via
+  `gh` with `--push`. 38 tests passing (`pytest`).
+- 🚧 Stretch: fully-automatic loop via SigNoz alert webhook; self-learning lesson write-back
+  to the agent's rules file; SigNoz dashboards.
 
 ## Components
 
@@ -43,7 +52,7 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 | Sample app | `codeautopsy/sample_app/` | Instrumented FastAPI "patient" with a seeded bug |
 | Enricher | `codeautopsy/enricher/` | On exception, mints the linked `codeautopsy.autopsy` span |
 | Coroner CLI | `codeautopsy/cli/` | `codeautopsy autopsy <trace>` — the chain of custody |
-| Fix bot | `codeautopsy/fixbot/` | Reads the autopsy, opens a fix PR (closes the loop) |
+| Fix Bot | `codeautopsy/fixbot/` | `codeautopsy fix <trace>` — patch, verify, commit, PR |
 
 ## Quickstart
 
@@ -60,6 +69,7 @@ All config comes from environment / `.env` (see `.env.example`). Key vars:
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT` — SigNoz OTLP endpoint (e.g. `https://ingest.in2.signoz.cloud:443`)
 - `SIGNOZ_INGESTION_KEY` — SigNoz Cloud ingestion key (git-ignored; never commit)
+- `ANTHROPIC_API_KEY` — required only for the Fix Bot (`codeautopsy fix`)
 
 ## License
 
