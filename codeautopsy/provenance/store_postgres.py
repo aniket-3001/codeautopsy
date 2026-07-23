@@ -112,3 +112,8 @@ class PostgresProvenanceStore:
         with psycopg.connect(self.dsn) as conn:
             row = conn.execute("SELECT COUNT(*) FROM provenance").fetchone()
         return row[0] if row else 0
+
+    def delete(self, decision_id: str) -> int:
+        with psycopg.connect(self.dsn) as conn:
+            cur = conn.execute("DELETE FROM provenance WHERE decision_id = %s", (decision_id,))
+            return cur.rowcount

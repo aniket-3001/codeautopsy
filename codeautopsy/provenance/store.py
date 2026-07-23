@@ -26,6 +26,7 @@ class ProvenanceStoreProtocol(Protocol):
     ) -> ProvenanceRecord | None: ...
     def all(self) -> list[ProvenanceRecord]: ...
     def count(self) -> int: ...
+    def delete(self, decision_id: str) -> int: ...
 
 
 _SCHEMA = """
@@ -134,3 +135,8 @@ class ProvenanceStore:
     def count(self) -> int:
         with self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM provenance").fetchone()[0]
+
+    def delete(self, decision_id: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM provenance WHERE decision_id = ?", (decision_id,))
+            return cur.rowcount

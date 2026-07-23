@@ -70,6 +70,16 @@ def test_last_writer_wins(store):
     assert rec is not None and rec.decision_id == "new"
 
 
+def test_delete_by_decision_id(store):
+    store.add(_record("abc123", 40, 45, decision_id="dec_1"))
+    store.add(_record("abc123", 40, 45, decision_id="dec_2"))
+
+    assert store.delete("dec_1") == 1
+    assert store.count() == 1
+    assert store.delete("dec_1") == 0
+    assert store.find_by_line("abc123", "app/payment.py", 42).decision_id == "dec_2"
+
+
 def test_add_many_and_all(store):
     n = store.add_many([_record("abc123", 1, 1), _record("abc123", 2, 2, decision_id="d2")])
     assert n == 2

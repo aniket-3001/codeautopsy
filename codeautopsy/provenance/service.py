@@ -39,7 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=DEMO_ORIGINS,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
 
@@ -61,6 +61,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/provenance", response_model=list[ProvenanceRecord])
     def list_all() -> list[ProvenanceRecord]:
         return store.all()
+
+    @app.delete("/provenance/{decision_id}")
+    def delete(decision_id: str) -> dict:
+        # Scoped by decision_id (not commit/file/line) so removing one demo submission can
+        # never delete someone else's real record for the same crashing line.
+        deleted = store.delete(decision_id)
+        return {"deleted": deleted, "records": store.count()}
 
     @app.post("/resolve", response_model=ResolveResponse)
     def resolve(req: ResolveRequest) -> ResolveResponse:

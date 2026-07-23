@@ -62,6 +62,26 @@ def test_add_bulk(tmp_path: Path):
     assert r.json() == {"added": 2, "records": 2}
 
 
+def test_delete_removes_only_matching_decision_id(tmp_path: Path):
+    client = _client(tmp_path)
+    client.post("/provenance", json=_record_payload(decision_id="dec_1"))
+    client.post("/provenance", json=_record_payload(decision_id="dec_2"))
+
+    r = client.delete("/provenance/dec_1")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": 1, "records": 1}
+
+    remaining = client.get("/provenance").json()
+    assert [rec["decision_id"] for rec in remaining] == ["dec_2"]
+
+
+def test_delete_nonexistent_decision_id_is_a_noop(tmp_path: Path):
+    client = _client(tmp_path)
+    r = client.delete("/provenance/does-not-exist")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": 0, "records": 0}
+
+
 def test_resolve_fast_path_over_http(tmp_path: Path):
     client = _client(tmp_path)
     client.post("/provenance", json=_record_payload())

@@ -51,6 +51,17 @@ def test_find_by_line_out_of_range(tmp_path: Path):
     assert store.find_by_line("othersha", "app/payment.py", 42) is None
 
 
+def test_delete_by_decision_id(tmp_path: Path):
+    store = ProvenanceStore(tmp_path / "p.db")
+    store.add(_record("abc123", 40, 45, decision_id="dec_1"))
+    store.add(_record("abc123", 40, 45, decision_id="dec_2"))
+
+    assert store.delete("dec_1") == 1
+    assert store.count() == 1
+    assert store.delete("dec_1") == 0  # already gone -> no-op
+    assert store.find_by_line("abc123", "app/payment.py", 42).decision_id == "dec_2"
+
+
 def test_last_writer_wins(tmp_path: Path):
     """Overlapping decisions on the same line -> most recent one is returned."""
     store = ProvenanceStore(tmp_path / "p.db")

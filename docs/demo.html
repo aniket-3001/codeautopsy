@@ -111,6 +111,10 @@
     <pre id="out-crash2" class="mono mt-4 hidden overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs leading-6 dark:border-zinc-800 dark:bg-black/40"></pre>
     <div id="win" class="mt-4 hidden rounded-xl border border-emerald-400/40 bg-emerald-400/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
       <span class="font-medium">Resolved.</span> The crash now carries your reasoning and risk flags straight from the decision that caused it — this is the span link CodeAutopsy mints in SigNoz, made visible here as plain JSON.
+      <div class="mt-3">
+        <button id="btn-reset" class="mono rounded-lg border border-emerald-400/50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-400/10 dark:text-emerald-300">Clean up my submission →</button>
+        <span class="ml-2 text-xs text-emerald-700/70 dark:text-emerald-300/70">this record is shared by every visitor — remove it so the next person also sees an unresolved crash first</span>
+      </div>
     </div>
   </section>
 
@@ -129,6 +133,7 @@ const FILE_PATH = "codeautopsy/sample_app/main.py";
 const LINE = 92;
 
 let commitSha = null;
+let lastDecisionId = null;
 
 function hex(n) {
   let s = "";
@@ -196,6 +201,7 @@ document.getElementById("btn-submit").addEventListener("click", async (e) => {
     tool: "live-sandbox-demo",
     decision_id: "dec_demo_" + hex(8),
   };
+  lastDecisionId = record.decision_id;
   try {
     const r = await fetch(PROVENANCE + "/provenance", {
       method: "POST",
@@ -217,6 +223,19 @@ document.getElementById("btn-crash2").addEventListener("click", async (e) => {
   e.target.disabled = false;
   if (codeautopsy && codeautopsy.resolved === true) {
     document.getElementById("win").classList.remove("hidden");
+  }
+});
+
+document.getElementById("btn-reset").addEventListener("click", async (e) => {
+  if (!lastDecisionId) return;
+  e.target.disabled = true;
+  e.target.textContent = "cleaning up…";
+  try {
+    await fetch(PROVENANCE + "/provenance/" + lastDecisionId, { method: "DELETE" });
+    e.target.textContent = "Done — the demo is unresolved again for the next visitor.";
+  } catch (err) {
+    e.target.textContent = "cleanup failed: " + err;
+    e.target.disabled = false;
   }
 });
 
