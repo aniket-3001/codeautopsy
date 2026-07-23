@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # --- Repo under observation ---------------------------------------------------
     target_repo: Path = Field(default=PROJECT_ROOT, alias="CODEAUTOPSY_TARGET_REPO")
 
+    # --- Fix Bot --------------------------------------------------------------------
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    fixbot_model: str = Field(default="claude-opus-4-8", alias="CODEAUTOPSY_FIXBOT_MODEL")
+
     @property
     def otel_headers(self) -> dict[str, str]:
         """Headers for OTLP export (SigNoz Cloud auth)."""
