@@ -54,6 +54,12 @@ class Settings(BaseSettings):
         description="Postgres DSN. When set, the provenance service persists here instead of "
         "the local SQLite file — set in production so data survives Cloud Run redeploys.",
     )
+    api_key: str | None = Field(
+        default=None,
+        alias="CODEAUTOPSY_API_KEY",
+        description="Hosted org API key. When set, the enricher resolves crashes against the "
+        "authenticated /v1/resolve — so they scope to your org and appear on your dashboard.",
+    )
 
     # --- Repo under observation ---------------------------------------------------
     target_repo: Path = Field(default=PROJECT_ROOT, alias="CODEAUTOPSY_TARGET_REPO")

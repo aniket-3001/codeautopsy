@@ -229,6 +229,64 @@ def test_resolve_decision_returns_parsed_response_on_success(monkeypatch):
     assert resp.introducing_commit == "abc123"
 
 
+def test_resolve_decision_uses_authenticated_v1_endpoint_when_api_key_set(monkeypatch):
+    """With an org API key, the enricher must resolve against /v1/resolve (scoped to the org)
+    and send the X-Api-Key header, carrying the crash context so an incident is persisted."""
+    captured: dict = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"resolved": True, "introducing_commit": "abc123", "detail": "ok"}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", _post)
+    settings = Settings(
+        CODEAUTOPSY_PROVENANCE_URL="http://localhost:8100", CODEAUTOPSY_API_KEY="ca_live_secret"
+    )
+
+    resp = resolve_decision(
+        settings, "abc123", "f.py", 1, exc_type="ValueError", exc_message="boom", blast_radius=3
+    )
+
+    assert resp.resolved is True
+    assert captured["url"] == "http://localhost:8100/v1/resolve"
+    assert captured["headers"] == {"X-Api-Key": "ca_live_secret"}
+    assert captured["json"]["exc_type"] == "ValueError"
+    assert captured["json"]["blast_radius"] == 3
+
+
+def test_resolve_decision_uses_public_endpoint_without_api_key(monkeypatch):
+    captured: dict = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"resolved": False, "detail": "n/a"}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", _post)
+    settings = Settings(CODEAUTOPSY_PROVENANCE_URL="http://localhost:8100")
+
+    resolve_decision(settings, "abc123", "f.py", 1)
+
+    assert captured["url"] == "http://localhost:8100/resolve"
+    assert captured["headers"] == {}
+
+
 def test_resolve_decision_returns_unresolved_when_provenance_service_unreachable(monkeypatch):
     def _raise(*args, **kwargs):
         raise httpx.ConnectError("connection refused")

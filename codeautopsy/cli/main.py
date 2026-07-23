@@ -6,6 +6,8 @@ report: which AI decision authored the crashing line, its reasoning, and its ris
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 from pathlib import Path
 
 import httpx
@@ -17,12 +19,29 @@ from rich.table import Table
 from codeautopsy.config import get_settings
 from codeautopsy.fixbot.core import FixBotError, run_fixbot
 from codeautopsy.otel import force_utf8_stdout
+from codeautopsy.provenance.models import ProvenanceRecord
 from codeautopsy.provenance.store import ProvenanceStore
 from codeautopsy.recorder.commit_indexer import index_pending_at_head
+
+# Default hosted provenance API — where `codeautopsy record --api-key` posts decisions.
+HOSTED_API_URL = "https://codeautopsy-provenance-3bczbiamba-uc.a.run.app"
 
 force_utf8_stdout()
 app = typer.Typer(help="CodeAutopsy — git blame for the AI era.", no_args_is_help=True)
 console = Console()
+
+
+def _parse_lines(lines: str) -> tuple[int, int]:
+    """Parse a `--lines` value: `42` -> (42, 42); `40-46` -> (40, 46)."""
+    text = lines.strip()
+    if "-" in text:
+        start_s, end_s = text.split("-", 1)
+        start, end = int(start_s), int(end_s)
+    else:
+        start = end = int(text)
+    if start > end:
+        start, end = end, start
+    return start, end
 
 
 @app.command()
@@ -111,6 +130,78 @@ def index_commit(
     store = ProvenanceStore(settings.provenance_db)
     n = index_pending_at_head(repo_root, store)
     console.print(f"[green]Indexed {n} decision(s) into the provenance store.[/green]")
+
+
+@app.command()
+def record(
+    commit: str = typer.Option(..., "--commit", help="Commit SHA the decision was made in."),
+    file: str = typer.Option(..., "--file", help="File path, repo-relative (e.g. app/checkout.py)."),  # noqa: E501
+    lines: str = typer.Option(..., "--lines", help="Line range the decision authored, e.g. 40-46."),
+    reasoning: str = typer.Option("", "--reasoning", help="Why the code was written this way."),
+    risk_flag: list[str] = typer.Option(
+        None, "--risk-flag", help="A risk flag for the decision (repeatable)."
+    ),
+    tool: str = typer.Option("manual", "--tool", help="Which agent/tool made the decision."),
+    model: str = typer.Option("", "--model", help="Model that authored it, if any."),
+    api_key: str = typer.Option(
+        None, "--api-key", envvar="CODEAUTOPSY_API_KEY",
+        help="Hosted org API key. If set, records to the hosted service; else writes locally.",
+    ),
+    api_url: str = typer.Option(
+        None, "--api-url", envvar="CODEAUTOPSY_API_URL",
+        help=f"Hosted provenance API base (default {HOSTED_API_URL}).",
+    ),
+) -> None:
+    """Record a decision from ANY agent — not just Claude Code.
+
+    The Claude Code hook records automatically; this is the agent-agnostic path so any tool,
+    script, or human can log the reasoning behind a line range and have crashes trace back to it.
+    """
+    line_start, line_end = _parse_lines(lines)
+    # Content-anchored id: survives reformatting/rebase where line numbers drift.
+    decision_id = "dec_" + hashlib.sha1(
+        f"{file}:{line_start}-{line_end}:{reasoning}".encode()
+    ).hexdigest()[:12]
+    record = ProvenanceRecord(
+        commit_sha=commit,
+        file_path=file,
+        line_start=line_start,
+        line_end=line_end,
+        decision_span_id=secrets.token_hex(8),
+        decision_trace_id=secrets.token_hex(16),
+        session_id=f"sess_{secrets.token_hex(4)}",
+        reasoning_summary=reasoning,
+        risk_flags=list(risk_flag or []),
+        model=model,
+        tool=tool,
+        decision_id=decision_id,
+    )
+
+    if api_key:
+        base = (api_url or HOSTED_API_URL).rstrip("/")
+        try:
+            resp = httpx.post(
+                f"{base}/v1/provenance",
+                json=record.model_dump(),
+                headers={"X-Api-Key": api_key},
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            console.print(f"[red]Failed to record to hosted service:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+        console.print(
+            f"[green]Recorded[/green] {decision_id} -> {file}:{line_start}-{line_end} "
+            f"(hosted, {resp.json().get('records', '?')} total)"
+        )
+    else:
+        settings = get_settings()
+        store = ProvenanceStore(settings.provenance_db)
+        store.add(record)
+        console.print(
+            f"[green]Recorded[/green] {decision_id} -> {file}:{line_start}-{line_end} "
+            f"(local {settings.provenance_db})"
+        )
 
 
 @app.command()

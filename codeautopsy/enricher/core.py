@@ -31,12 +31,37 @@ CAUSE_OF_DEATH_BY_EXC: dict[str, str] = {
 
 
 def resolve_decision(
-    settings: Settings, commit_sha: str, file_path: str, line: int
+    settings: Settings,
+    commit_sha: str,
+    file_path: str,
+    line: int,
+    *,
+    exc_type: str = "",
+    exc_message: str = "",
+    blast_radius: int = 1,
 ) -> ResolveResponse:
-    """Ask the provenance service which AI decision authored this crashing line."""
-    req = ResolveRequest(commit_sha=commit_sha, file_path=file_path, line=line)
+    """Ask the provenance service which AI decision authored this crashing line.
+
+    When an org `api_key` is configured, resolve against the authenticated `/v1/resolve`:
+    the lookup is scoped to that org's decisions and the crash is persisted as an incident on
+    the org's dashboard. Without a key, fall back to the public `/resolve` (demo tenant).
+    """
+    req = ResolveRequest(
+        commit_sha=commit_sha,
+        file_path=file_path,
+        line=line,
+        exc_type=exc_type,
+        exc_message=exc_message,
+        blast_radius=blast_radius,
+    )
+    if settings.api_key:
+        url = f"{settings.provenance_url}/v1/resolve"
+        headers = {"X-Api-Key": settings.api_key}
+    else:
+        url = f"{settings.provenance_url}/resolve"
+        headers = {}
     try:
-        resp = httpx.post(f"{settings.provenance_url}/resolve", json=req.model_dump(), timeout=3.0)
+        resp = httpx.post(url, json=req.model_dump(), headers=headers, timeout=3.0)
         resp.raise_for_status()
         return ResolveResponse(**resp.json())
     except httpx.HTTPError as exc:
@@ -86,7 +111,16 @@ def autopsy_exception(
     autopsy span itself.
     """
     settings = settings or get_settings()
-    resolution = resolve_decision(settings, commit_sha, file_path, line)
+    exc_type = type(exc).__name__
+    resolution = resolve_decision(
+        settings,
+        commit_sha,
+        file_path,
+        line,
+        exc_type=exc_type,
+        exc_message=str(exc),
+        blast_radius=blast_radius,
+    )
 
     tracer = trace.get_tracer("codeautopsy.enricher", tracer_provider=tracer_provider)
     links = []
@@ -100,7 +134,6 @@ def autopsy_exception(
     resolution.crash_trace_id = format(span_ctx.trace_id, "032x")
     resolution.crash_span_id = format(span_ctx.span_id, "016x")
 
-    exc_type = type(exc).__name__
     cause = CAUSE_OF_DEATH_BY_EXC.get(exc_type, f"unhandled {exc_type}: {exc}")
 
     span.set_attribute("codeautopsy.cause_of_death", cause)
