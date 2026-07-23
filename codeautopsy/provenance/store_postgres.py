@@ -19,7 +19,7 @@ _COLUMNS = (
 
 _INCIDENT_COLUMNS = (
     "org_id, incident_id, commit_sha, file_path, line, exc_type, exc_message, resolved, "
-    "decision_id, blast_radius, created_at"
+    "decision_id, blast_radius, crash_trace_id, crash_span_id, created_at"
 )
 
 _SCHEMA = """
@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS incidents (
     resolved     BOOLEAN NOT NULL DEFAULT FALSE,
     decision_id  TEXT,
     blast_radius INTEGER NOT NULL DEFAULT 1,
+    crash_trace_id TEXT,
+    crash_span_id  TEXT,
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, created_at);
@@ -76,6 +78,9 @@ class PostgresProvenanceStore:
                 "CREATE INDEX idx_blame "
                 "ON provenance(org_id, commit_sha, file_path, line_start, line_end)"
             )
+            # Migration for incidents tables that predate the crash-trace columns.
+            conn.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS crash_trace_id TEXT")
+            conn.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS crash_span_id TEXT")
 
     def add(self, record: ProvenanceRecord) -> None:
         with psycopg.connect(self.dsn) as conn:
@@ -173,7 +178,7 @@ class PostgresProvenanceStore:
             conn.execute(
                 f"""
                 INSERT INTO incidents ({_INCIDENT_COLUMNS})
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     incident.org_id,
@@ -186,6 +191,8 @@ class PostgresProvenanceStore:
                     incident.resolved,
                     incident.decision_id,
                     incident.blast_radius,
+                    incident.crash_trace_id,
+                    incident.crash_span_id,
                     incident.created_at,
                 ),
             )

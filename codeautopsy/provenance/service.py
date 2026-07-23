@@ -178,6 +178,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 resolved=resp.resolved,
                 decision_id=resp.record.decision_id if resp.record else None,
                 blast_radius=req.blast_radius,
+                crash_trace_id=req.crash_trace_id or None,
+                crash_span_id=req.crash_span_id or None,
             )
         )
         return resp

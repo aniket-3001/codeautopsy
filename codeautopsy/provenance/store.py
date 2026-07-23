@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS incidents (
     resolved     INTEGER NOT NULL DEFAULT 0,
     decision_id  TEXT,
     blast_radius INTEGER NOT NULL DEFAULT 1,
+    crash_trace_id TEXT,
+    crash_span_id  TEXT,
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, created_at);
@@ -98,6 +100,12 @@ class ProvenanceStore:
                 "CREATE INDEX idx_blame "
                 "ON provenance(org_id, commit_sha, file_path, line_start, line_end)"
             )
+            # Migration for incidents tables that predate the crash-trace columns.
+            for col in ("crash_trace_id", "crash_span_id"):
+                try:
+                    conn.execute(f"ALTER TABLE incidents ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError:
+                    pass
 
     # --- writes -------------------------------------------------------------------
     def add(self, record: ProvenanceRecord) -> None:
@@ -193,8 +201,9 @@ class ProvenanceStore:
                 """
                 INSERT INTO incidents (
                     org_id, incident_id, commit_sha, file_path, line,
-                    exc_type, exc_message, resolved, decision_id, blast_radius, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    exc_type, exc_message, resolved, decision_id, blast_radius,
+                    crash_trace_id, crash_span_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     incident.org_id,
@@ -207,6 +216,8 @@ class ProvenanceStore:
                     int(incident.resolved),
                     incident.decision_id,
                     incident.blast_radius,
+                    incident.crash_trace_id,
+                    incident.crash_span_id,
                     incident.created_at,
                 ),
             )

@@ -53,6 +53,10 @@ class ResolveRequest(BaseModel):
     exc_type: str = ""
     exc_message: str = ""
     blast_radius: int = 1
+    # The crashing trace's own (trace_id, span_id), hex-encoded — so the dashboard can
+    # deep-link an incident straight into its SigNoz trace (the money shot, in-dashboard).
+    crash_trace_id: str = ""
+    crash_span_id: str = ""
 
 
 class ResolveResponse(BaseModel):
@@ -85,4 +89,8 @@ class IncidentRecord(BaseModel):
     resolved: bool = False
     decision_id: str | None = None
     blast_radius: int = 1
+    # The crashing trace's own ids, so the dashboard can jump straight into SigNoz for this
+    # incident. Nullable — a resolve triggered without a live crash trace simply has none.
+    crash_trace_id: str | None = None
+    crash_span_id: str | None = None
     created_at: str = Field(default_factory=_now)

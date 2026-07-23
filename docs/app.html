@@ -49,8 +49,11 @@
   <p>Built for the WeMakeDevs × SigNoz hackathon — Track 3 · Agents of SigNoz.</p>
 </footer>
 
+<div id="modal-root"></div>
+
 <script>
 const API = "https://codeautopsy-provenance-3bczbiamba-uc.a.run.app";
+const SIGNOZ_CONSOLE = "https://mighty-bonefish.in2.signoz.cloud";
 
 // --- tiny auth-state helpers -------------------------------------------------------------
 function getToken() { return localStorage.getItem("ca_token"); }
@@ -97,8 +100,78 @@ function fmtDate(iso) {
   try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
 }
 
+function dayKey(iso) {
+  try { return new Date(iso).toISOString().slice(0, 10); } catch (e) { return ""; }
+}
+
+function signozTraceLink(traceId, spanId) {
+  if (!traceId) return null;
+  return `${SIGNOZ_CONSOLE}/trace/${traceId}${spanId ? "?spanId=" + spanId : ""}`;
+}
+
+// --- playground key: one ephemeral X-Api-Key per page session, held only in memory --------
+let _pgKey = null;
+async function playgroundKey() {
+  if (_pgKey) return _pgKey;
+  const created = await api("/v1/keys", { method: "POST", headers: authHeaders(), rawBody: "" });
+  _pgKey = created.key;
+  return _pgKey;
+}
+
+// --- tiny chart helpers (no external libs — inline SVG/CSS) -------------------------------
+function barRows(items) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return items.map((i) => `
+    <div class="mt-2.5 first:mt-0">
+      <div class="flex items-baseline justify-between gap-2">
+        <span class="mono truncate text-xs text-zinc-500 dark:text-zinc-400">${esc(i.label)}</span>
+        <span class="mono text-xs text-zinc-400">${i.value}</span>
+      </div>
+      <div class="mt-1 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div class="h-1.5 rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500" style="width:${Math.round((i.value / max) * 100)}%"></div>
+      </div>
+    </div>`).join("");
+}
+
+function ring(pct, label) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  return `
+    <div class="flex items-center gap-4">
+      <div class="grid h-20 w-20 place-items-center rounded-full" style="background:conic-gradient(#22d3ee ${p}%, rgba(148,163,184,.18) 0)">
+        <div class="grid h-14 w-14 place-items-center rounded-full bg-[#f6f8fc] dark:bg-[#0a0e1a]">
+          <span class="mono text-lg">${p}%</span>
+        </div>
+      </div>
+      <div class="text-xs text-zinc-500 dark:text-zinc-400">${label}</div>
+    </div>`;
+}
+
+function sparkBars(counts) {
+  const max = Math.max(1, ...counts.map((c) => c.value));
+  return `<div class="flex items-end gap-1" style="height:44px">${counts.map((c) => `
+    <div class="group relative flex-1" title="${esc(c.label)}: ${c.value}">
+      <div class="w-full rounded-t bg-gradient-to-t from-cyan-500/60 to-indigo-500/60" style="height:${Math.max(3, Math.round((c.value / max) * 44))}px"></div>
+    </div>`).join("")}</div>`;
+}
+
+// --- modal ------------------------------------------------------------------------------
+function openModal(html) {
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" data-close></div>
+    <div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8" data-close>
+      <div class="card w-full max-w-lg" data-stop>${html}</div>
+    </div>`;
+  root.querySelectorAll("[data-close]").forEach((el) =>
+    el.addEventListener("click", (e) => { if (e.target === el) closeModal(); })
+  );
+  const stop = root.querySelector("[data-stop]");
+  if (stop) stop.addEventListener("click", (e) => e.stopPropagation());
+}
+function closeModal() { document.getElementById("modal-root").innerHTML = ""; }
+
 // --- router -------------------------------------------------------------------------------
-const PROTECTED = ["#/dashboard", "#/onboarding", "#/settings"];
+const PROTECTED = ["#/dashboard", "#/autopsy", "#/onboarding", "#/settings"];
 
 function navigate(hash) { location.hash = hash; }
 
@@ -118,6 +191,7 @@ async function render() {
     if (hash === "#/login") return renderAuthForm("login");
     if (hash === "#/onboarding") return await renderOnboarding();
     if (hash === "#/dashboard") return await renderDashboard();
+    if (hash === "#/autopsy") return await renderAutopsy();
     if (hash === "#/settings") return await renderSettings();
     main.innerHTML = '<p class="text-sm text-zinc-500">Not found.</p>';
   } catch (err) {
@@ -130,6 +204,7 @@ function renderNav() {
   if (getToken()) {
     nav.innerHTML = `
       <a href="#/dashboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Dashboard</a>
+      <a href="#/autopsy" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Live Autopsy</a>
       <a href="#/settings" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Settings</a>
       <span class="mono hidden text-xs text-zinc-400 sm:inline">${esc(getEmail())}</span>
       <button id="btn-logout" class="rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Log out</button>`;
@@ -262,72 +337,326 @@ async function renderOnboarding() {
   });
 }
 
+let _dash = { decisions: [], incidents: [], org_id: "" };
+
+function decisionById(id) {
+  return _dash.decisions.find((d) => d.decision_id && d.decision_id === id) || null;
+}
+
 async function renderDashboard() {
   const data = await api("/v1/dashboard", { headers: authHeaders() });
-  const decisions = data.decisions || [];
-  const incidents = data.incidents || [];
+  const decisions = (data.decisions || []).slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  const incidents = (data.incidents || []).slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  _dash = { decisions, incidents, org_id: data.org_id };
+
+  const totalFlags = decisions.reduce((n, d) => n + (d.risk_flags || []).length, 0);
+  const resolvedCount = data.resolved_incident_count ?? incidents.filter((i) => i.resolved).length;
+  const resolveRate = incidents.length ? (resolvedCount / incidents.length) * 100 : 0;
+
+  // decisions-per-day sparkline (last 10 active days, chronological)
+  const perDay = {};
+  decisions.forEach((d) => { const k = dayKey(d.created_at); if (k) perDay[k] = (perDay[k] || 0) + 1; });
+  const dayBuckets = Object.keys(perDay).sort().slice(-10).map((k) => ({ label: k, value: perDay[k] }));
+
+  // riskiest files: risk flags on decisions + incidents touching the file
+  const fileScore = {};
+  decisions.forEach((d) => { fileScore[d.file_path] = (fileScore[d.file_path] || 0) + (d.risk_flags || []).length; });
+  incidents.forEach((i) => { fileScore[i.file_path] = (fileScore[i.file_path] || 0) + 1; });
+  const riskyFiles = Object.entries(fileScore).map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value).slice(0, 5);
+
+  // risk-flag distribution
+  const flagCount = {};
+  decisions.forEach((d) => (d.risk_flags || []).forEach((f) => { flagCount[f] = (flagCount[f] || 0) + 1; }));
+  const flagRows = Object.entries(flagCount).map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value).slice(0, 6);
+
+  const hasData = decisions.length || incidents.length;
+
   document.getElementById("main").innerHTML = `
-    <h1 class="serif text-3xl">Dashboard</h1>
-    <p class="mono mt-1 text-xs text-zinc-400">org · ${esc(data.org_id)}</p>
-    <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-      <div class="card !p-4"><div class="mono text-2xl">${decisions.length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">decisions indexed</div></div>
-      <div class="card !p-4"><div class="mono text-2xl">${new Set(decisions.map(d => d.commit_sha)).size}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">commits covered</div></div>
-      <div class="card !p-4"><div class="mono text-2xl">${decisions.reduce((n, d) => n + (d.risk_flags || []).length, 0)}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">risk flags raised</div></div>
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="serif text-3xl">Dashboard</h1>
+        <p class="mono mt-1 text-xs text-zinc-400">org · ${esc(data.org_id)}</p>
+      </div>
+      <a href="#/autopsy" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-2 text-xs font-medium text-white transition hover:-translate-y-0.5">Run a Live Autopsy →</a>
     </div>
 
+    <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="card !p-4"><div class="mono text-2xl">${decisions.length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">decisions indexed</div></div>
+      <div class="card !p-4"><div class="mono text-2xl">${incidents.length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">incidents seen</div></div>
+      <div class="card !p-4"><div class="mono text-2xl">${resolvedCount}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">resolved to a decision</div></div>
+      <div class="card !p-4"><div class="mono text-2xl">${totalFlags}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">risk flags raised</div></div>
+    </div>
+
+    ${hasData ? `
+    <div class="mt-4 grid gap-3 sm:grid-cols-2">
+      <div class="card !p-5">
+        <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">autopsy resolve rate</p>
+        <div class="mt-3">${ring(resolveRate, `${resolvedCount} of ${incidents.length} incidents traced back<br>to the AI decision that caused them`)}</div>
+      </div>
+      <div class="card !p-5">
+        <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">decisions indexed / day</p>
+        <div class="mt-3">${dayBuckets.length ? sparkBars(dayBuckets) : '<p class="text-xs text-zinc-400">no data yet</p>'}</div>
+        <p class="mono mt-2 text-[11px] text-zinc-400">${dayBuckets.length ? esc(dayBuckets[0].label) + " → " + esc(dayBuckets[dayBuckets.length - 1].label) : ""}</p>
+      </div>
+      <div class="card !p-5">
+        <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">riskiest files</p>
+        <div class="mt-3">${riskyFiles.length ? barRows(riskyFiles) : '<p class="text-xs text-zinc-400">no data yet</p>'}</div>
+      </div>
+      <div class="card !p-5">
+        <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">risk-flag distribution</p>
+        <div class="mt-3">${flagRows.length ? barRows(flagRows) : '<p class="text-xs text-zinc-400">no flags raised</p>'}</div>
+      </div>
+    </div>
+
+    <div class="mt-8">
+      <input id="dash-filter" type="text" placeholder="filter by file, commit, reasoning, exception, or risk flag…"
+        class="mono w-full rounded-xl border border-zinc-300 bg-white/60 p-2.5 text-sm dark:border-zinc-700 dark:bg-black/30">
+    </div>` : ""}
+
+    <h2 class="serif mt-8 text-xl">Decisions</h2>
     ${decisions.length === 0 ? `
-      <div class="card mt-8 text-center">
-        <p class="text-sm text-zinc-500 dark:text-zinc-400">No decisions yet. Ingest one with your API key to see it appear here.</p>
+      <div class="card mt-3 text-center">
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">No decisions yet. Ingest one with your API key, or run a Live Autopsy.</p>
         <a href="#/onboarding" class="mono mt-3 inline-block text-sm text-cyan-600 dark:text-cyan-400">Get your API key →</a>
       </div>` : `
-      <div class="mt-8 grid gap-3">
-        ${decisions
-          .slice()
-          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-          .map((d) => `
-            <div class="card !p-4">
-              <div class="flex items-center justify-between">
-                <span class="mono text-xs text-zinc-400">${esc((d.commit_sha || "").slice(0, 8))} · ${esc(d.file_path)}:${d.line_start}-${d.line_end}</span>
-                <span class="mono text-[11px] text-zinc-400">${fmtDate(d.created_at)}</span>
-              </div>
-              <p class="mt-2 text-sm">${esc(d.reasoning_summary)}</p>
-              <div class="mt-2 flex flex-wrap gap-1.5">
-                ${(d.risk_flags || []).map(f => `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}</span>`).join("")}
-              </div>
-            </div>`)
-          .join("")}
+      <div id="decisions-list" class="mt-3 grid gap-3">
+        ${decisions.map((d) => `
+          <div class="filter-card card !p-4" data-search="${esc(((d.commit_sha || "") + " " + d.file_path + " " + (d.reasoning_summary || "") + " " + (d.risk_flags || []).join(" ")).toLowerCase())}">
+            <div class="flex items-center justify-between">
+              <span class="mono text-xs text-zinc-400">${esc((d.commit_sha || "").slice(0, 8))} · ${esc(d.file_path)}:${d.line_start}-${d.line_end}</span>
+              <span class="mono text-[11px] text-zinc-400">${fmtDate(d.created_at)}</span>
+            </div>
+            <p class="mt-2 text-sm">${esc(d.reasoning_summary)}</p>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              ${(d.risk_flags || []).map((f) => `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}</span>`).join("")}
+            </div>
+          </div>`).join("")}
       </div>`}
 
     <h2 class="serif mt-10 text-xl">Incidents</h2>
-    <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-      <div class="card !p-4"><div class="mono text-2xl">${incidents.length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">incidents seen</div></div>
-      <div class="card !p-4"><div class="mono text-2xl">${data.resolved_incident_count ?? incidents.filter(i => i.resolved).length}</div><div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">resolved to a decision</div></div>
-    </div>
-
     ${incidents.length === 0 ? `
-      <div class="card mt-4 text-center">
-        <p class="text-sm text-zinc-500 dark:text-zinc-400">No incidents yet. When your instrumented app crashes and calls /v1/resolve, it'll show up here.</p>
+      <div class="card mt-3 text-center">
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">No incidents yet. Run a Live Autopsy, or let your instrumented app crash and call /v1/resolve.</p>
       </div>` : `
-      <div class="mt-4 grid gap-3">
-        ${incidents
-          .slice()
-          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-          .map((i) => `
-            <div class="card !p-4">
-              <div class="flex items-center justify-between">
-                <span class="mono text-xs text-zinc-400">${esc((i.commit_sha || "").slice(0, 8))} · ${esc(i.file_path)}:${i.line}</span>
-                <span class="mono text-[11px] text-zinc-400">${fmtDate(i.created_at)}</span>
-              </div>
-              <p class="mt-2 text-sm">${esc(i.exc_type)}${i.exc_type && i.exc_message ? ": " : ""}${esc(i.exc_message)}</p>
-              <div class="mt-2 flex flex-wrap items-center gap-1.5">
-                <span class="mono rounded-full border px-2 py-0.5 text-[11px] ${i.resolved ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300" : "border-zinc-400/40 bg-zinc-400/10 text-zinc-500 dark:text-zinc-400"}">${i.resolved ? "resolved" : "unresolved"}</span>
-                ${i.decision_id ? `<span class="mono text-[11px] text-zinc-400">${esc(i.decision_id)}</span>` : ""}
-                ${i.blast_radius > 1 ? `<span class="mono text-[11px] text-zinc-400">blast radius ${i.blast_radius}</span>` : ""}
-              </div>
-            </div>`)
-          .join("")}
+      <div id="incidents-list" class="mt-3 grid gap-3">
+        ${incidents.map((i) => `
+          <button class="filter-card incident-card card !p-4 text-left transition hover:-translate-y-0.5 hover:border-cyan-400/50" data-id="${esc(i.incident_id)}" data-search="${esc(((i.commit_sha || "") + " " + i.file_path + " " + (i.exc_type || "") + " " + (i.exc_message || "")).toLowerCase())}">
+            <div class="flex items-center justify-between">
+              <span class="mono text-xs text-zinc-400">${esc((i.commit_sha || "").slice(0, 8))} · ${esc(i.file_path)}:${i.line}</span>
+              <span class="mono text-[11px] text-zinc-400">${fmtDate(i.created_at)}</span>
+            </div>
+            <p class="mt-2 text-sm">${esc(i.exc_type)}${i.exc_type && i.exc_message ? ": " : ""}${esc(i.exc_message)}</p>
+            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+              <span class="mono rounded-full border px-2 py-0.5 text-[11px] ${i.resolved ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300" : "border-zinc-400/40 bg-zinc-400/10 text-zinc-500 dark:text-zinc-400"}">${i.resolved ? "resolved" : "unresolved"}</span>
+              ${i.crash_trace_id ? `<span class="mono text-[11px] text-cyan-500">SigNoz trace ↗</span>` : ""}
+              ${i.blast_radius > 1 ? `<span class="mono text-[11px] text-zinc-400">blast radius ${i.blast_radius}</span>` : ""}
+              <span class="mono ml-auto text-[11px] text-zinc-400">details →</span>
+            </div>
+          </button>`).join("")}
       </div>`}
   `;
+
+  const filter = document.getElementById("dash-filter");
+  if (filter) {
+    filter.addEventListener("input", () => {
+      const q = filter.value.trim().toLowerCase();
+      document.querySelectorAll(".filter-card").forEach((el) => {
+        el.classList.toggle("hidden", q && !el.dataset.search.includes(q));
+      });
+    });
+  }
+  document.querySelectorAll(".incident-card").forEach((el) =>
+    el.addEventListener("click", () => openIncident(el.dataset.id))
+  );
+}
+
+function openIncident(incidentId) {
+  const i = _dash.incidents.find((x) => x.incident_id === incidentId);
+  if (!i) return;
+  const decision = i.decision_id ? decisionById(i.decision_id) : null;
+  const traceLink = signozTraceLink(i.crash_trace_id, i.crash_span_id);
+
+  openModal(`
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <p class="mono text-[11px] uppercase tracking-wider ${i.resolved ? "text-emerald-500" : "text-zinc-400"}">${i.resolved ? "resolved incident" : "unresolved incident"}</p>
+        <h2 class="serif mt-1 text-2xl">${esc(i.exc_type || "Exception")}</h2>
+      </div>
+      <button data-modal-close class="mono text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">✕</button>
+    </div>
+    <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">${esc(i.exc_message || "")}</p>
+    <div class="mono mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+      <div>file · <span class="text-zinc-700 dark:text-zinc-200">${esc(i.file_path)}:${i.line}</span></div>
+      <div>commit · <span class="text-zinc-700 dark:text-zinc-200">${esc((i.commit_sha || "").slice(0, 8))}</span></div>
+      <div>blast radius · <span class="text-zinc-700 dark:text-zinc-200">${i.blast_radius}</span></div>
+      <div>seen · <span class="text-zinc-700 dark:text-zinc-200">${fmtDate(i.created_at)}</span></div>
+    </div>
+
+    <div class="mt-5 rounded-xl border ${decision ? "border-cyan-400/30 bg-cyan-400/5" : "border-zinc-300/50 dark:border-zinc-700/50"} p-4">
+      <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">the AI decision that authored this line</p>
+      ${decision ? `
+        <p class="mt-2 text-sm">${esc(decision.reasoning_summary || "(no reasoning recorded)")}</p>
+        <div class="mt-2 flex flex-wrap gap-1.5">
+          ${(decision.risk_flags || []).map((f) => `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}</span>`).join("")}
+        </div>
+        <p class="mono mt-3 text-[11px] text-zinc-400">${esc(decision.decision_id)} · ${esc(decision.model || decision.tool || "")}</p>
+      ` : `<p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">No indexed decision matched this crash — the crashing line predates provenance capture, or wasn't AI-authored.</p>`}
+    </div>
+
+    ${traceLink ? `
+      <a href="${traceLink}" target="_blank" rel="noopener" class="mono mt-4 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5">
+        View this trace in SigNoz →
+      </a>
+      <p class="mt-2 text-center text-[11px] text-zinc-400">crosses the build/run boundary: crash trace → the AI's decision span</p>
+    ` : `<p class="mono mt-4 text-center text-[11px] text-zinc-400">no crash trace id on this incident — resolve was called without live trace context</p>`}
+
+    ${decision ? `
+      <details class="mt-4 rounded-xl border border-zinc-300/50 p-4 dark:border-zinc-700/50">
+        <summary class="mono cursor-pointer text-[11px] uppercase tracking-wider text-zinc-400">Fix Bot — the genealogy handed to the agent</summary>
+        <p class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">CodeAutopsy hands the agent its own decision back, so it fixes the cause with full context instead of guessing:</p>
+        <pre class="mono mt-2 overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-[11px] leading-5 dark:border-zinc-800 dark:bg-black/40"># the crash
+${esc(i.exc_type)}: ${esc(i.exc_message)}
+  at ${esc(i.file_path)}:${i.line} (commit ${esc((i.commit_sha || "").slice(0, 8))})
+
+# your original decision (${esc(decision.decision_id)})
+reasoning: ${esc(decision.reasoning_summary || "")}
+risk flags: ${esc((decision.risk_flags || []).join(", ") || "none")}
+
+# what CodeAutopsy asks the agent
+"You wrote this line with the reasoning above. It just crashed in production.
+ Fix the cause, add a regression test, and don't repeat the risk you flagged."</pre>
+        <p class="mono mt-3 text-[11px] text-zinc-400">run it locally: <span class="text-zinc-700 dark:text-zinc-200">codeautopsy fix ${esc((i.commit_sha || "").slice(0, 8))} ${esc(i.file_path)} ${i.line}</span></p>
+      </details>
+    ` : ""}
+  `);
+  document.querySelectorAll("[data-modal-close]").forEach((b) => b.addEventListener("click", closeModal));
+}
+
+async function renderAutopsy() {
+  const pg = {};  // holds the seeded decision between steps
+
+  document.getElementById("main").innerHTML = `
+    <h1 class="serif text-3xl">Live Autopsy</h1>
+    <p class="mt-2 max-w-xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+      Run the whole CodeAutopsy loop on <span class="text-zinc-700 dark:text-zinc-200">your own org</span>, right here —
+      index an AI decision, simulate the crash it causes, and watch it resolve back to that decision with a
+      one-click jump into SigNoz. No CLI, no curl. This uses a temporary API key scoped to your org.
+    </p>
+
+    <!-- Step 1 -->
+    <div id="step1" class="card mt-8">
+      <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">① index an AI decision</p>
+      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">This is what the Recorder captures every time your agent edits code.</p>
+      <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        <label class="block"><span class="mono text-[11px] text-zinc-400">commit sha</span>
+          <input id="d-commit" value="a1b2c3d4" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+        <label class="block"><span class="mono text-[11px] text-zinc-400">file path</span>
+          <input id="d-file" value="app/checkout.py" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+        <label class="block"><span class="mono text-[11px] text-zinc-400">line start</span>
+          <input id="d-lstart" type="number" value="40" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+        <label class="block"><span class="mono text-[11px] text-zinc-400">line end</span>
+          <input id="d-lend" type="number" value="46" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+      </div>
+      <label class="mt-3 block"><span class="mono text-[11px] text-zinc-400">reasoning summary</span>
+        <textarea id="d-reason" rows="2" class="mt-1 w-full rounded-lg border border-zinc-300 p-2 text-sm dark:border-zinc-700">assuming discount_code is always a clean integer string — skipped validation to hit the deadline</textarea></label>
+      <label class="mt-3 block"><span class="mono text-[11px] text-zinc-400">risk flags (comma-separated)</span>
+        <input id="d-flags" value="assumed_valid_input" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+      <button id="btn-seed" class="mono mt-4 rounded-xl bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Index this decision →</button>
+      <p id="seed-msg" class="mono mt-3 hidden text-xs"></p>
+    </div>
+
+    <!-- Step 2 -->
+    <div id="step2" class="card mt-4 opacity-40 pointer-events-none">
+      <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">② simulate the crash</p>
+      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Your production app hits an exception on that line and calls <span class="mono">/v1/resolve</span>.</p>
+      <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        <label class="block"><span class="mono text-[11px] text-zinc-400">crashing line</span>
+          <input id="c-line" type="number" value="42" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+        <label class="block"><span class="mono text-[11px] text-zinc-400">exception type</span>
+          <input id="c-type" value="ValueError" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+      </div>
+      <label class="mt-3 block"><span class="mono text-[11px] text-zinc-400">exception message</span>
+        <input id="c-msg" value="invalid literal for int() with base 10: 'SAVE20'" class="mono mt-1 w-full rounded-lg border border-zinc-300 p-2 text-xs dark:border-zinc-700"></label>
+      <button id="btn-crash" class="mono mt-4 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 disabled:opacity-50">💥 Crash &amp; autopsy →</button>
+    </div>
+
+    <!-- Step 3 -->
+    <div id="step3" class="mt-4"></div>
+  `;
+
+  document.getElementById("btn-seed").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-seed");
+    const msg = document.getElementById("seed-msg");
+    btn.disabled = true; msg.classList.add("hidden");
+    try {
+      const key = await playgroundKey();
+      pg.commit_sha = document.getElementById("d-commit").value.trim();
+      pg.file_path = document.getElementById("d-file").value.trim();
+      pg.line_start = parseInt(document.getElementById("d-lstart").value, 10);
+      pg.line_end = parseInt(document.getElementById("d-lend").value, 10);
+      pg.decision_id = "dec_" + hex(8);
+      const body = {
+        commit_sha: pg.commit_sha, file_path: pg.file_path,
+        line_start: pg.line_start, line_end: pg.line_end,
+        decision_span_id: hex(16), decision_trace_id: hex(32),
+        session_id: "sess_playground",
+        reasoning_summary: document.getElementById("d-reason").value.trim(),
+        risk_flags: document.getElementById("d-flags").value.split(",").map((s) => s.trim()).filter(Boolean),
+        decision_id: pg.decision_id,
+      };
+      await api("/v1/provenance", { method: "POST", headers: { "X-Api-Key": key }, body });
+      msg.textContent = "✓ indexed " + pg.decision_id + " · " + pg.file_path + ":" + pg.line_start + "-" + pg.line_end;
+      msg.className = "mono mt-3 text-xs text-emerald-500";
+      msg.classList.remove("hidden");
+      const s2 = document.getElementById("step2");
+      s2.classList.remove("opacity-40", "pointer-events-none");
+    } catch (err) {
+      msg.textContent = err.message; msg.className = "mono mt-3 text-xs text-red-500"; msg.classList.remove("hidden");
+    } finally { btn.disabled = false; }
+  });
+
+  document.getElementById("btn-crash").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-crash");
+    btn.disabled = true;
+    const out = document.getElementById("step3");
+    out.innerHTML = '<p class="mono text-sm text-zinc-400">running autopsy…</p>';
+    try {
+      const key = await playgroundKey();
+      const crashTrace = hex(32), crashSpan = hex(16);
+      const resp = await api("/v1/resolve", {
+        method: "POST", headers: { "X-Api-Key": key },
+        body: {
+          commit_sha: pg.commit_sha, file_path: pg.file_path,
+          line: parseInt(document.getElementById("c-line").value, 10),
+          exc_type: document.getElementById("c-type").value.trim(),
+          exc_message: document.getElementById("c-msg").value.trim(),
+          blast_radius: 1,
+          crash_trace_id: crashTrace, crash_span_id: crashSpan,
+        },
+      });
+      const traceLink = signozTraceLink(crashTrace, crashSpan);
+      out.innerHTML = `
+        <div class="card border-emerald-400/40">
+          <p class="mono text-[11px] uppercase tracking-wider ${resp.resolved ? "text-emerald-500" : "text-zinc-400"}">③ ${resp.resolved ? "autopsy complete — cause of death identified" : "no matching decision found"}</p>
+          ${resp.resolved && resp.record ? `
+            <p class="mt-3 text-sm">This crash traces back to the AI decision that wrote the line:</p>
+            <div class="mt-2 rounded-xl border border-cyan-400/30 bg-cyan-400/5 p-4">
+              <p class="text-sm">${esc(resp.record.reasoning_summary)}</p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                ${(resp.record.risk_flags || []).map((f) => `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}</span>`).join("")}
+              </div>
+              <p class="mono mt-3 text-[11px] text-zinc-400">${esc(resp.record.decision_id)}</p>
+            </div>
+            <a href="${traceLink}" target="_blank" rel="noopener" class="mono mt-4 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5">View this trace in SigNoz →</a>
+          ` : `<p class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">${esc(resp.detail || "The crashing line didn't fall within any indexed decision.")}</p>`}
+          <a href="#/dashboard" class="mono mt-4 inline-block text-sm text-cyan-600 dark:text-cyan-400">See it on your dashboard →</a>
+        </div>`;
+    } catch (err) {
+      out.innerHTML = `<div class="card border-red-400/40"><p class="text-sm text-red-500">${esc(err.message)}</p></div>`;
+    } finally { btn.disabled = false; }
+  });
 }
 
 async function renderSettings() {

@@ -163,6 +163,29 @@ def test_ingest_resolve_and_dashboard_round_trip(tmp_path: Path):
     assert incident["blast_radius"] == 3
 
 
+def test_resolve_persists_crash_trace_ids_for_signoz_deeplink(tmp_path: Path):
+    client = _client(tmp_path)
+    token = _signup(client, "dev@example.com")["access_token"]
+    api_key = client.post("/v1/keys", headers=_auth_headers(token)).json()["key"]
+
+    r = client.post(
+        "/v1/resolve",
+        json={
+            "commit_sha": "abc123",
+            "file_path": "app/payment.py",
+            "line": 42,
+            "crash_trace_id": "dad1a6c62838f2369ceaa36846a684a9",
+            "crash_span_id": "b2ad89f995e4b170",
+        },
+        headers={"X-Api-Key": api_key},
+    )
+    assert r.status_code == 200
+
+    incident = client.get("/v1/dashboard", headers=_auth_headers(token)).json()["incidents"][0]
+    assert incident["crash_trace_id"] == "dad1a6c62838f2369ceaa36846a684a9"
+    assert incident["crash_span_id"] == "b2ad89f995e4b170"
+
+
 def test_resolve_records_unresolved_incident_when_no_decision_matches(tmp_path: Path):
     client = _client(tmp_path)
     token = _signup(client, "dev@example.com")["access_token"]
