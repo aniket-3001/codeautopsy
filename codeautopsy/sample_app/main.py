@@ -133,6 +133,8 @@ def checkout(payload: dict) -> dict:
                             resolution.record.reasoning_summary if resolution.record else None
                         ),
                         "risk_flags": resolution.record.risk_flags if resolution.record else [],
+                        "crash_trace_id": resolution.crash_trace_id,
+                        "crash_span_id": resolution.crash_span_id,
                     },
                 },
             ) from exc

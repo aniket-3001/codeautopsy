@@ -115,6 +115,9 @@
     <div id="win" class="mt-4 hidden rounded-xl border border-emerald-400/40 bg-emerald-400/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
       <span class="font-medium">Resolved.</span> The crash now carries your reasoning and risk flags straight from the decision that caused it — this is the span link CodeAutopsy mints in SigNoz, made visible here as plain JSON.
       <div class="mt-3">
+        <a id="btn-signoz" href="#" target="_blank" rel="noopener" class="mono inline-block rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-medium text-white transition hover:-translate-y-0.5 hover:bg-emerald-600">View this trace in SigNoz →</a>
+      </div>
+      <div class="mt-3">
         <button id="btn-reset" class="mono rounded-lg border border-emerald-400/50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-400/10 dark:text-emerald-300">Clean up my submission →</button>
         <span class="ml-2 text-xs text-emerald-700/70 dark:text-emerald-300/70">this record is shared by every visitor — remove it so the next person also sees an unresolved crash first</span>
       </div>
@@ -132,6 +135,7 @@
 <script>
 const SAMPLE_APP = "https://codeautopsy-sample-app-3bczbiamba-uc.a.run.app";
 const PROVENANCE = "https://codeautopsy-provenance-3bczbiamba-uc.a.run.app";
+const SIGNOZ_CONSOLE = "https://mighty-bonefish.in2.signoz.cloud";
 const FILE_PATH = "codeautopsy/sample_app/main.py";
 const LINE = 92;
 
@@ -226,6 +230,12 @@ document.getElementById("btn-crash2").addEventListener("click", async (e) => {
   e.target.disabled = false;
   if (codeautopsy && codeautopsy.resolved === true) {
     document.getElementById("win").classList.remove("hidden");
+    if (codeautopsy.crash_trace_id) {
+      const url = `${SIGNOZ_CONSOLE}/trace/${codeautopsy.crash_trace_id}?spanId=${codeautopsy.crash_span_id}`;
+      document.getElementById("btn-signoz").href = url;
+    } else {
+      document.getElementById("btn-signoz").classList.add("hidden");
+    }
   }
 });
 

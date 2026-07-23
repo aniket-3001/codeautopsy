@@ -76,6 +76,11 @@ def test_autopsy_exception_resolved_creates_span_link(monkeypatch):
     assert autopsy_span.attributes["codeautopsy.decision.summary"] == "assuming input is always valid"
     assert autopsy_span.attributes["codeautopsy.risk_flags"] == "assumed_valid_input"
 
+    # The money-shot deep link: the crash span's own (trace_id, span_id), hex-encoded,
+    # must match what actually got exported — not just be non-empty.
+    assert resolution.crash_trace_id == format(autopsy_span.context.trace_id, "032x")
+    assert resolution.crash_span_id == format(autopsy_span.context.span_id, "016x")
+
 
 def test_autopsy_exception_unresolved_has_no_link(monkeypatch):
     monkeypatch.setattr(

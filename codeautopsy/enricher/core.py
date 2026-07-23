@@ -96,6 +96,10 @@ def autopsy_exception(
             links.append(link)
 
     span = tracer.start_span("codeautopsy.autopsy", links=links)
+    span_ctx = span.get_span_context()
+    resolution.crash_trace_id = format(span_ctx.trace_id, "032x")
+    resolution.crash_span_id = format(span_ctx.span_id, "016x")
+
     exc_type = type(exc).__name__
     cause = CAUSE_OF_DEATH_BY_EXC.get(exc_type, f"unhandled {exc_type}: {exc}")
 

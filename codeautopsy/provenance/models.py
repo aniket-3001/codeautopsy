@@ -52,3 +52,7 @@ class ResolveResponse(BaseModel):
     introducing_commit: str | None = None
     record: ProvenanceRecord | None = None
     detail: str = ""
+    # Populated only by autopsy_exception() — the crash span's own (trace_id, span_id),
+    # hex-encoded, so a caller can deep-link straight into that trace in SigNoz.
+    crash_trace_id: str | None = None
+    crash_span_id: str | None = None
