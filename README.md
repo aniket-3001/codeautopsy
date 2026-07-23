@@ -10,6 +10,10 @@ correlation to walk from **crash → cause of death → the AI's original decisi
 
 Built for the **WeMakeDevs × SigNoz** hackathon (Track 3 · Agents of SigNoz).
 
+**Live:** [landing page](https://aniket-3001.github.io/codeautopsy/) ·
+[sample app](https://codeautopsy-sample-app-182653908302.us-central1.run.app/health) ·
+[provenance API](https://codeautopsy-provenance-182653908302.us-central1.run.app/health)
+
 ---
 
 ## The one trick
@@ -48,7 +52,8 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 - 🚧 Stretch: fully-automatic loop via SigNoz alert webhook; self-learning lesson write-back
   to the agent's rules file; SigNoz dashboards.
 
-**Landing page:** [`docs/index.html`](docs/index.html) — deployed via GitHub Pages
+**Landing page:** https://aniket-3001.github.io/codeautopsy/ — built from
+[`docs/index.html`](docs/index.html), deployed via GitHub Pages
 (`.github/workflows/pages.yml`) on push to `main`.
 
 ## Components
