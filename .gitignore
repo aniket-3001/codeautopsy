@@ -14,11 +14,13 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.coverage
 
 # CodeAutopsy local state
 *.sqlite
 *.sqlite3
 provenance.db
+.codeautopsy/
 
 # OS / editor
 .DS_Store
