@@ -42,6 +42,9 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
   `gh` with `--push`. 101 tests passing, 100% coverage, ruff + mypy clean (`pytest`).
 - ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test on every
   push, image published to GHCR on `main`, landing page deployed via GitHub Pages.
+- ✅ Live on Google Cloud Run (see [Deployment](#deployment) below) — provenance + sample app
+  deployed and validated end-to-end on real infra, redeployed automatically on every push to
+  `main`.
 - 🚧 Stretch: fully-automatic loop via SigNoz alert webhook; self-learning lesson write-back
   to the agent's rules file; SigNoz dashboards.
 
@@ -107,6 +110,45 @@ GitHub Actions (`.github/workflows/`):
   publishes it to GHCR (`ghcr.io/<owner>/<repo>`), tagged by commit SHA and `latest`.
 - **`pages.yml`** — on push to `main` touching `docs/`: deploys `docs/index.html` to GitHub
   Pages.
+- **`deploy-cloud-run.yml`** — on push to `main` (or manual dispatch): builds the image, pushes
+  it to Artifact Registry, and redeploys both Cloud Run services. Authenticates via Workload
+  Identity Federation (no long-lived key stored in GitHub).
+
+## Deployment
+
+Live on Google Cloud Run, project `codeautopsy-hackathon`, region `us-central1`:
+
+- **Provenance**: https://codeautopsy-provenance-182653908302.us-central1.run.app
+  (`min-instances=1` so the SQLite-backed `resolve` API stays warm for a demo)
+- **Sample app**: https://codeautopsy-sample-app-182653908302.us-central1.run.app
+  (points its `CODEAUTOPSY_PROVENANCE_URL` at the provenance service above)
+
+```bash
+curl https://codeautopsy-sample-app-182653908302.us-central1.run.app/health
+```
+
+**Known limitation:** `provenance.db` is SQLite on local container disk, so it resets whenever
+Cloud Run starts a fresh revision (including on every CI/CD redeploy). Fine for a hackathon demo
+of the join mechanism; a persistent deployment would move this to Cloud SQL or a mounted GCS
+volume.
+
+To reproduce the deploy manually (e.g. onto a different GCP project):
+
+```bash
+gcloud auth configure-docker us-central1-docker.pkg.dev
+docker build -t us-central1-docker.pkg.dev/<project>/codeautopsy/app:latest .
+docker push us-central1-docker.pkg.dev/<project>/codeautopsy/app:latest
+
+gcloud run deploy codeautopsy-provenance --image=us-central1-docker.pkg.dev/<project>/codeautopsy/app:latest \
+  --command=codeautopsy-provenance --port=8100 --min-instances=1 --max-instances=1 \
+  --set-env-vars="CODEAUTOPSY_PROVENANCE_URL=http://0.0.0.0:8100,CODEAUTOPSY_TARGET_REPO=/app" \
+  --allow-unauthenticated
+
+gcloud run deploy codeautopsy-sample-app --image=us-central1-docker.pkg.dev/<project>/codeautopsy/app:latest \
+  --command=codeautopsy-sample --port=8000 \
+  --set-env-vars="CODEAUTOPSY_PROVENANCE_URL=<provenance-url-from-above>,CODEAUTOPSY_TARGET_REPO=/app,CODEAUTOPSY_RUNTIME_SERVICE=checkout-api" \
+  --allow-unauthenticated
+```
 
 ## License
 
