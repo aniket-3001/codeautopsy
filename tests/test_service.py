@@ -6,8 +6,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from codeautopsy.config import Settings
-from codeautopsy.provenance.service import create_app
+from codeautopsy.config import Settings, get_settings
+from codeautopsy.provenance.service import create_app, run
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -81,3 +81,24 @@ def test_resolve_unresolved_when_no_match(tmp_path: Path):
     )
     assert r.status_code == 200
     assert r.json()["resolved"] is False
+
+
+def test_run_parses_host_and_port_from_provenance_url(monkeypatch):
+    monkeypatch.setenv("CODEAUTOPSY_PROVENANCE_URL", "http://0.0.0.0:9100")
+    get_settings.cache_clear()
+
+    calls = {}
+
+    def fake_run(app, host, port):
+        calls["host"] = host
+        calls["port"] = port
+
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    try:
+        run()
+    finally:
+        get_settings.cache_clear()
+
+    assert calls == {"host": "0.0.0.0", "port": 9100}

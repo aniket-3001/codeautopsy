@@ -1,0 +1,20 @@
+# NOTE: .git is intentionally NOT excluded — the provenance join engine runs `git blame`
+# against this repo's own history at runtime, so the image needs real git history.
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+provenance.db
+.env
+.claude/
+.idea/
+Dockerfile
+docker-compose.yml
+.dockerignore

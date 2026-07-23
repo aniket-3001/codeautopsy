@@ -5,7 +5,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from codeautopsy.provenance.indexer import blame_introducing_commit, resolve
+import codeautopsy.provenance.indexer as indexer_module
+from codeautopsy.provenance.indexer import (
+    blame_introducing_commit,
+    blame_origin,
+    index_records,
+    resolve,
+)
 from codeautopsy.provenance.models import ProvenanceRecord, ResolveRequest
 from codeautopsy.provenance.store import ProvenanceStore
 
@@ -109,3 +115,67 @@ def test_blame_join_end_to_end(tmp_path: Path):
     assert resp.introducing_commit == introducing
     assert resp.record is not None
     assert resp.record.reasoning_summary == "assuming the input is always valid"
+
+
+# --- blame_origin: malformed / missing-repo edge cases --------------------------------------
+
+
+def test_blame_origin_returns_none_when_git_fails(tmp_path: Path):
+    # Not a git repo at all -> the git subprocess exits non-zero -> GitError caught -> None.
+    assert blame_origin(tmp_path, "app.py", 1) is None
+
+
+def test_blame_origin_returns_none_on_empty_output(monkeypatch):
+    monkeypatch.setattr(indexer_module, "_git", lambda *a, **k: "")
+    assert blame_origin("repo", "f.py", 1) is None
+
+
+def test_blame_origin_returns_none_on_malformed_header(monkeypatch):
+    monkeypatch.setattr(indexer_module, "_git", lambda *a, **k: "onlyonetoken\n")
+    assert blame_origin("repo", "f.py", 1) is None
+
+
+def test_blame_origin_returns_none_on_invalid_sha_chars(monkeypatch):
+    monkeypatch.setattr(indexer_module, "_git", lambda *a, **k: "not-hex-sha! 1 1\n")
+    assert blame_origin("repo", "f.py", 1) is None
+
+
+def test_blame_origin_returns_none_on_non_numeric_orig_line(monkeypatch):
+    monkeypatch.setattr(indexer_module, "_git", lambda *a, **k: "abc1234 notanumber 1\n")
+    assert blame_origin("repo", "f.py", 1) is None
+
+
+def test_resolve_blame_finds_commit_but_no_indexed_decision(tmp_path: Path):
+    """Blame succeeds but nothing was ever indexed for that commit — a partial resolution."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t.co"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "seed"], check=True)
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    store = ProvenanceStore(tmp_path / "p.db")
+    resp = resolve(store, ResolveRequest(commit_sha=head, file_path="app.py", line=1), repo=repo)
+    assert resp.resolved is False
+    assert resp.introducing_commit == head
+    assert "no AI decision is indexed" in resp.detail
+
+
+def test_index_records_bulk_loads_into_store(tmp_path: Path):
+    store = ProvenanceStore(tmp_path / "p.db")
+    n = index_records(store, [_record("abc123", 1, 1), _record("abc123", 2, 2, decision_id="d2")])
+    assert n == 2
+    assert store.count() == 2
+
+
+def test_record_contains_line():
+    rec = _record("abc123", 40, 45)
+    assert rec.contains_line(40) is True
+    assert rec.contains_line(45) is True
+    assert rec.contains_line(39) is False
+    assert rec.contains_line(46) is False

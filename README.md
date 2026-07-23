@@ -39,9 +39,14 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 - ✅ Coroner CLI — `codeautopsy autopsy`, `index-commit`, `status`.
 - ✅ Fix Bot — `codeautopsy fix <commit> <file> <line>`: feeds the agent its own genealogy,
   verifies the patch with a real regression test before committing anything, opens a PR via
-  `gh` with `--push`. 38 tests passing (`pytest`).
+  `gh` with `--push`. 101 tests passing, 100% coverage, ruff + mypy clean (`pytest`).
+- ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test on every
+  push, image published to GHCR on `main`, landing page deployed via GitHub Pages.
 - 🚧 Stretch: fully-automatic loop via SigNoz alert webhook; self-learning lesson write-back
   to the agent's rules file; SigNoz dashboards.
+
+**Landing page:** [`docs/index.html`](docs/index.html) — deployed via GitHub Pages
+(`.github/workflows/pages.yml`) on push to `main`.
 
 ## Components
 
@@ -69,7 +74,39 @@ All config comes from environment / `.env` (see `.env.example`). Key vars:
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT` — SigNoz OTLP endpoint (e.g. `https://ingest.in2.signoz.cloud:443`)
 - `SIGNOZ_INGESTION_KEY` — SigNoz Cloud ingestion key (git-ignored; never commit)
-- `ANTHROPIC_API_KEY` — required only for the Fix Bot (`codeautopsy fix`)
+- `GROQ_API_KEY` — required only for the Fix Bot (`codeautopsy fix`); free key at https://console.groq.com/keys
+
+## Docker
+
+Run the whole spine (provenance service + instrumented sample app) without a local Python
+install:
+
+```bash
+docker compose up --build
+```
+
+This starts `provenance` (port `8100`) and `sample-app` (port `8000`), sharing a network and a
+named volume for `provenance.db`. `sample-app` waits for `provenance`'s healthcheck before
+starting. Both containers use an **editable** install (`pip install -e`) so `.git` history ships
+inside the image and `git blame`-based resolution behaves identically to a bare-metal checkout —
+`sample_app`'s `REPO_ROOT` depends on this. Override `OTEL_EXPORTER_OTLP_ENDPOINT` and
+`SIGNOZ_INGESTION_KEY` via a `.env` file to point the containers at SigNoz Cloud.
+
+```bash
+curl http://localhost:8000/health                                           # {"status":"ok","commit":"<sha>"}
+curl -X POST http://localhost:8000/checkout -d '{"discount_code":"10","subtotal":100}'
+```
+
+## CI/CD
+
+GitHub Actions (`.github/workflows/`):
+
+- **`ci.yml`** — on every push/PR to `main`: editable install, `ruff check`, `mypy`, `pytest`
+  with coverage (`fail_under = 95`, see `pyproject.toml`), coverage XML uploaded as an artifact.
+- **`docker-publish.yml`** — on push to `main` (or manual dispatch): builds the image and
+  publishes it to GHCR (`ghcr.io/<owner>/<repo>`), tagged by commit SHA and `latest`.
+- **`pages.yml`** — on push to `main` touching `docs/`: deploys `docs/index.html` to GitHub
+  Pages.
 
 ## License
 

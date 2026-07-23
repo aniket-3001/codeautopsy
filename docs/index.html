@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeAutopsy — trace the bug back to the decision that wrote it</title>
+<meta name="description" content="CodeAutopsy traces a production crash back across the build/run boundary to the exact AI-agent decision that caused it, using OpenTelemetry span links and a git-blame provenance index.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2.4' stroke-linecap='round'><path d='M4 12h6'/><path d='M14 12h6'/><circle cx='11' cy='12' r='2' fill='%2322d3ee' stroke='none'/><circle cx='17' cy='6' r='2' fill='%236366f1' stroke='none'/><path d='M13 10.5 15.5 7.5' stroke='%236366f1'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --color-zinc-50:#f5f7fa; --color-zinc-100:#eef1f6; --color-zinc-200:#e0e5ee; --color-zinc-300:#cbd3e1;
+    --color-zinc-400:#93a0b5; --color-zinc-500:#64718a; --color-zinc-600:#475066; --color-zinc-700:#353d50;
+    --color-zinc-800:#222838; --color-zinc-900:#161b28; --color-zinc-950:#0d1119;
+  }
+  body{font-family:'Geist',system-ui,sans-serif}
+  html{scroll-behavior:smooth}
+  .serif{font-family:'Instrument Serif','Spectral',Georgia,serif;font-weight:400}
+  .mono{font-family:'Geist Mono',ui-monospace,monospace}
+  a:focus-visible,button:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:5px}
+  .grad{background:linear-gradient(90deg,#0891b2,#4f46e5);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+  .dark .grad{background:linear-gradient(90deg,#22d3ee,#6366f1);-webkit-background-clip:text;background-clip:text}
+  .bg-grid{background-image:radial-gradient(rgba(100,116,139,.13) 1px,transparent 1px);background-size:26px 26px}
+  .dark .bg-grid{background-image:radial-gradient(rgba(148,163,184,.07) 1px,transparent 1px)}
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .rise{opacity:0;animation:rise .8s cubic-bezier(.22,1,.36,1) forwards}
+  .reveal{opacity:0;transform:translateY(20px);transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .7s cubic-bezier(.22,1,.36,1)}
+  .reveal.in{opacity:1;transform:none}
+  .stg>*{opacity:0;transform:translateY(20px);transition:opacity .55s cubic-bezier(.22,1,.36,1),transform .55s cubic-bezier(.22,1,.36,1),box-shadow .3s ease,border-color .3s ease}
+  .stg.in>*{opacity:1;transform:none;transition-delay:calc(var(--i,0)*90ms)}
+  .stg.in>.rounded-2xl:hover{transition-delay:0s;box-shadow:0 20px 50px -24px rgba(2,8,20,.55);border-color:rgba(34,211,238,.45)}
+  @media (prefers-reduced-motion:reduce){.rise,.reveal,.stg>*{opacity:1!important;transform:none!important;transition:none;animation:none}}
+  .card{position:relative;background-image:radial-gradient(240px circle at var(--mx,-200px) var(--my,-200px), rgba(34,211,238,.14), transparent 60%)}
+  .jump{stroke-dasharray:6 6;animation:dash 1.4s linear infinite}
+  @keyframes dash{to{stroke-dashoffset:-24}}
+  @media (prefers-reduced-motion:reduce){.jump{animation:none}}
+</style>
+</head>
+<body class="bg-[#f6f8fc] text-slate-900 antialiased dark:bg-[#0a0e1a] dark:text-slate-100">
+<a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-zinc-950 focus:px-4 focus:py-2 focus:text-sm focus:text-white dark:focus:bg-white dark:focus:text-black">Skip to content</a>
+<div aria-hidden="true" class="bg-grid fixed inset-0 -z-10"></div>
+
+<header class="sticky top-0 z-20 border-b border-zinc-300/70 bg-[#f4f7fc]/80 backdrop-blur dark:border-zinc-900 dark:bg-[#0a0e1a]/75">
+  <div class="mx-auto flex max-w-5xl items-center justify-between px-5 py-3.5">
+    <div class="flex items-center gap-2">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h6" stroke="#6366f1" stroke-width="2.4" stroke-linecap="round"/><path d="M14 12h6" stroke="#22d3ee" stroke-width="2.4" stroke-linecap="round"/><circle cx="11" cy="12" r="2.1" fill="#6366f1"/><circle cx="17" cy="6" r="2.1" fill="#22d3ee"/><path class="jump" d="M13 10.3 15.6 7.4" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/></svg>
+      <span class="serif text-xl leading-none tracking-tight">CodeAutopsy</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="https://github.com/" target="_blank" rel="noopener" class="mr-1 hidden text-sm font-medium text-zinc-500 transition hover:text-zinc-900 sm:inline dark:text-zinc-400 dark:hover:text-zinc-100">Docs</a>
+      <button id="theme" aria-label="Toggle theme" class="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900">
+        <svg class="block dark:hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="hidden dark:block" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+      </button>
+      <a href="https://github.com/" target="_blank" rel="noopener" aria-label="GitHub repository" class="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.7 5.6.7 11.9c0 5 3.2 9.3 7.7 10.8.6.1.8-.2.8-.5v-2c-3.1.7-3.8-1.3-3.8-1.3-.5-1.3-1.2-1.7-1.2-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.6 1.2 3.2.9.1-.7.4-1.2.7-1.5-2.5-.3-5.1-1.3-5.1-5.7 0-1.2.4-2.2 1.2-3-.1-.3-.5-1.5.1-3 0 0 .9-.3 3.1 1.2a10.7 10.7 0 0 1 5.6 0c2.2-1.5 3.1-1.2 3.1-1.2.6 1.5.2 2.7.1 3 .7.8 1.2 1.8 1.2 3 0 4.4-2.6 5.4-5.1 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.6.8.5 4.5-1.5 7.7-5.8 7.7-10.8C23.3 5.6 18.3.5 12 .5z"/></svg>
+      </a>
+      <a href="#pipeline" class="rounded-full bg-zinc-950 px-5 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">See how it works</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="mx-auto max-w-4xl px-5 pt-24 pb-16 text-center">
+  <div class="rise mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400" style="animation-delay:.05s"><span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span><span class="mono">record · resolve · <span class="text-cyan-600 dark:text-cyan-400">fix()</span></span> · built for SigNoz</div>
+  <h1 class="rise serif text-5xl leading-[1.05] tracking-tight sm:text-6xl lg:text-[4.75rem]" style="animation-delay:.12s">Observability stops at the deploy.<br><span class="grad italic">CodeAutopsy doesn't.</span></h1>
+  <p class="rise mx-auto mt-6 max-w-2xl text-base leading-relaxed text-zinc-500 dark:text-zinc-400" style="animation-delay:.22s"><span class="mono text-zinc-700 dark:text-zinc-300">git blame</span> tells you which commit broke prod. CodeAutopsy tells you which <span class="font-medium text-zinc-900 dark:text-zinc-100">reasoning step of which AI agent</span> broke it — crossing the dev-time → runtime boundary with a single OpenTelemetry span link, then handing the agent its own autopsy so it fixes itself.</p>
+  <div class="rise mt-9 flex flex-wrap justify-center gap-3" style="animation-delay:.32s">
+    <a href="https://github.com/" target="_blank" rel="noopener" class="rounded-full bg-zinc-950 px-7 py-3 text-sm font-medium text-white transition duration-200 hover:-translate-y-0.5 hover:bg-zinc-800 hover:shadow-lg hover:shadow-cyan-500/10 dark:bg-white dark:text-black dark:hover:bg-zinc-200">View on GitHub →</a>
+    <a href="#mechanism" class="rounded-xl border border-zinc-300 px-6 py-3 text-sm font-medium text-zinc-700 transition duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900">See the mechanism ↓</a>
+  </div>
+</section>
+
+<section class="mx-auto max-w-4xl px-5 pb-24">
+  <div class="reveal overflow-hidden rounded-2xl border border-zinc-300 bg-white/60 shadow-2xl shadow-cyan-500/10 backdrop-blur dark:border-zinc-800 dark:bg-[#0b1018]/60">
+    <div class="flex items-center gap-1.5 border-b border-zinc-200/80 px-3.5 py-2.5 dark:border-zinc-800/80">
+      <span class="h-2.5 w-2.5 rounded-full bg-red-400/60"></span><span class="h-2.5 w-2.5 rounded-full bg-amber-400/60"></span><span class="h-2.5 w-2.5 rounded-full bg-emerald-400/60"></span>
+      <span class="ml-2 mono text-[11px] text-zinc-400">codeautopsy · the jump, in one trace</span>
+    </div>
+    <div class="grid grid-cols-1 gap-6 p-6 sm:grid-cols-2 sm:gap-2">
+      <div>
+        <div class="mono text-[11px] uppercase tracking-wider text-zinc-400">runtime · checkout-api</div>
+        <div class="mt-2 mono text-sm leading-7 text-zinc-700 dark:text-zinc-300">
+          POST /checkout <span class="text-red-500">500</span><br>
+          &nbsp;&nbsp;└─ parse_discount()<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;└─ <span class="text-cyan-600 dark:text-cyan-400">codeautopsy.autopsy</span>
+        </div>
+      </div>
+      <div class="sm:border-l sm:border-dashed sm:border-zinc-300 sm:pl-6 dark:sm:border-zinc-700">
+        <div class="mono text-[11px] uppercase tracking-wider text-zinc-400">dev-time · claude-code</div>
+        <div class="mt-2 mono text-sm leading-7 text-zinc-700 dark:text-zinc-300">
+          agent.turn<br>
+          &nbsp;&nbsp;└─ agent.tool.Edit<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-zinc-400 dark:text-zinc-500">"assuming input is valid"</span>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 border-t border-zinc-200/80 px-5 py-3 mono text-[11px] text-zinc-500 dark:border-zinc-800/80 dark:text-zinc-400">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      one OTel span link — click it in SigNoz to jump from the crash straight to the decision that caused it
+    </div>
+  </div>
+</section>
+
+<section id="mechanism" class="mx-auto max-w-5xl px-5 pb-24">
+  <h2 class="reveal serif text-center text-4xl italic">The one trick</h2>
+  <p class="reveal mx-auto mt-3 max-w-xl text-center text-sm text-zinc-500 dark:text-zinc-400">Four hops, each one ordinary. Chained together, they cross a boundary no other observability tool instruments.</p>
+  <div class="stg mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:0">
+      <div class="mono text-xs text-cyan-600 dark:text-cyan-400">01</div>
+      <div class="mt-2 font-medium">file:line</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">A runtime stack frame from the crash — the only thing a normal APM gives you.</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:1">
+      <div class="mono text-xs text-cyan-600 dark:text-cyan-400">02</div>
+      <div class="mt-2 font-medium">git blame</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">At the deployed commit, blame resolves that line to the commit that introduced it — even if it's shifted since.</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:2">
+      <div class="mono text-xs text-cyan-600 dark:text-cyan-400">03</div>
+      <div class="mt-2 font-medium">provenance index</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">(commit, file, line-range) → the AI decision span that wrote it, including its own recorded reasoning.</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:3">
+      <div class="mono text-xs text-cyan-600 dark:text-cyan-400">04</div>
+      <div class="mt-2 font-medium">span link</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Stitches the runtime error trace to that dev-time decision trace — one click in SigNoz, crash to cause.</p>
+    </div>
+  </div>
+</section>
+
+<section id="pipeline" class="mx-auto max-w-5xl px-5 pb-24">
+  <h2 class="reveal serif text-center text-4xl italic">The pipeline</h2>
+  <p class="reveal mx-auto mt-3 max-w-xl text-center text-sm text-zinc-500 dark:text-zinc-400">Five small components. None of them are clever alone — the join is the whole product.</p>
+  <div class="stg mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:0">
+      <div class="font-medium">Recorder</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">A Claude Code <span class="mono">PostToolUse</span> hook that mints a dev-time decision span for every edit, carrying the agent's own reasoning and risk flags.</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:1">
+      <div class="font-medium">Provenance</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">SQLite store plus the git-blame join engine — the <span class="mono">resolve()</span> API that answers "which decision wrote this line."</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:2">
+      <div class="font-medium">Enricher</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Runs inside the instrumented sample app. On exception, mints the linked <span class="mono">codeautopsy.autopsy</span> span and logs the incident.</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:3">
+      <div class="font-medium">Coroner CLI</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400"><span class="mono">codeautopsy autopsy &lt;commit&gt; &lt;file&gt; &lt;line&gt;</span> — the chain of custody, printed for a human.</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60 sm:col-span-2" style="--i:4">
+      <div class="font-medium">Fix Bot</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Feeds the agent its own genealogy — the reasoning that wrote the bug and the incident that proves it broke — as a forced tool call. Applies the patch, proves it with a real regression test derived from the exact failing input, and only commits + opens a PR if that test actually passes.</p>
+    </div>
+  </div>
+</section>
+
+<section class="mx-auto max-w-4xl px-5 pb-28">
+  <div class="reveal rounded-2xl border border-zinc-300 bg-white/60 p-8 text-center backdrop-blur dark:border-zinc-800 dark:bg-[#0b1018]/60">
+    <div class="mono text-xs uppercase tracking-[0.2em] text-zinc-400">status</div>
+    <p class="serif mt-3 text-2xl italic">Day-0 validated on real infrastructure.</p>
+    <p class="mx-auto mt-3 max-w-lg text-sm text-zinc-500 dark:text-zinc-400">The span-link click navigates across traces and services in SigNoz Cloud. 100+ tests, ruff and mypy clean, containerized with Docker, gated by CI.</p>
+    <div class="mt-6 flex flex-wrap justify-center gap-2 text-xs">
+      <span class="rounded-full border border-zinc-300 px-3 py-1 mono text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">99% coverage</span>
+      <span class="rounded-full border border-zinc-300 px-3 py-1 mono text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">ruff · mypy clean</span>
+      <span class="rounded-full border border-zinc-300 px-3 py-1 mono text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">docker compose up</span>
+      <span class="rounded-full border border-zinc-300 px-3 py-1 mono text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">CI on every push</span>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="border-t border-zinc-300/70 px-5 py-10 text-center text-xs text-zinc-400 dark:border-zinc-900 dark:text-zinc-600">
+  <p>Built for the WeMakeDevs × SigNoz hackathon — Track 3 · Agents of SigNoz.</p>
+  <p class="mt-1">MIT licensed.</p>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var stored = localStorage.getItem('theme');
+  if (stored === 'light') root.classList.remove('dark');
+  document.getElementById('theme').addEventListener('click', function () {
+    root.classList.toggle('dark');
+    localStorage.setItem('theme', root.classList.contains('dark') ? 'dark' : 'light');
+  });
+})();
+
+(function () {
+  if (!('IntersectionObserver' in window)) return;
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal, .stg').forEach(function (el) { io.observe(el); });
+})();
+
+(function () {
+  document.querySelectorAll('.card').forEach(function (card) {
+    card.addEventListener('mousemove', function (e) {
+      var r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+      card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+    });
+  });
+})();
+</script>
+</body>
+</html>

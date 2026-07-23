@@ -7,12 +7,16 @@ with a real regression test derived from the exact failing input, and — only i
 actually passes — commits it on its own branch and opens a PR carrying the chain of custody
 as evidence.
 
+Model calls go through Groq (OpenAI-compatible chat-completions API, free tier) rather than a
+paid provider — forced tool-choice gives the same structured, no-prose-parsing guarantee.
+
 Safety: this mutates a git working tree, so every step that touches it refuses to run unless
 the tree is clean beforehand, and failed verification never leaves a commit behind.
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -22,37 +26,42 @@ from codeautopsy.enricher.incidents import latest_incident_for
 from codeautopsy.fixbot.models import FixBotResult, FixProposal, Genealogy
 
 FIX_TOOL = {
-    "name": "submit_fix",
-    "description": "Submit the corrected file content and a regression test proving the fix.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "explanation": {
-                "type": "string",
-                "description": "One short paragraph: what was wrong and why this fix is correct.",
+    "type": "function",
+    "function": {
+        "name": "submit_fix",
+        "description": "Submit the corrected file content and a regression test proving the fix.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "explanation": {
+                    "type": "string",
+                    "description": (
+                        "One short paragraph: what was wrong and why this fix is correct."
+                    ),
+                },
+                "fixed_file_content": {
+                    "type": "string",
+                    "description": "The FULL corrected content of the source file, ready to write.",
+                },
+                "regression_test_code": {
+                    "type": "string",
+                    "description": (
+                        "A complete, standalone pytest test function (its own `def test_...():` "
+                        "block, including any needed imports at the top) that reproduces the "
+                        "exact original crash via the app's real entrypoint and asserts it no "
+                        "longer raises / now behaves correctly."
+                    ),
+                },
+                "lesson": {
+                    "type": "string",
+                    "description": (
+                        "One sentence generalizing the mistake into a rule ('always validate "
+                        "external input before int()'), to feed back into the agent's own rules."
+                    ),
+                },
             },
-            "fixed_file_content": {
-                "type": "string",
-                "description": "The FULL corrected content of the source file, ready to write.",
-            },
-            "regression_test_code": {
-                "type": "string",
-                "description": (
-                    "A complete, standalone pytest test function (its own `def test_...():` "
-                    "block, including any needed imports at the top) that reproduces the "
-                    "exact original crash via the app's real entrypoint and asserts it no "
-                    "longer raises / now behaves correctly."
-                ),
-            },
-            "lesson": {
-                "type": "string",
-                "description": (
-                    "One sentence generalizing the mistake into a rule ('always validate "
-                    "external input before int()'), to feed back into the agent's own rules."
-                ),
-            },
+            "required": ["explanation", "fixed_file_content", "regression_test_code", "lesson"],
         },
-        "required": ["explanation", "fixed_file_content", "regression_test_code", "lesson"],
     },
 }
 
@@ -128,25 +137,26 @@ def propose_fix(genealogy: Genealogy, settings: Settings | None = None) -> FixPr
     always structured — no prose-parsing, no ambiguity about what to apply.
     """
     settings = settings or get_settings()
-    if not settings.anthropic_api_key:
+    if not settings.groq_api_key:
         raise FixBotError(
-            "ANTHROPIC_API_KEY not set — required for the Fix Bot to call the model."
+            "GROQ_API_KEY not set — required for the Fix Bot to call the model."
         )
 
-    import anthropic
+    import groq
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    response = client.messages.create(  # type: ignore[call-overload]
+    client = groq.Groq(api_key=settings.groq_api_key)
+    response = client.chat.completions.create(  # type: ignore[call-overload]
         model=settings.fixbot_model,
         max_tokens=4096,
         tools=[FIX_TOOL],
-        tool_choice={"type": "tool", "name": "submit_fix"},
+        tool_choice={"type": "function", "function": {"name": "submit_fix"}},
         messages=[{"role": "user", "content": _prompt(genealogy)}],
     )
 
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "submit_fix":
-            return FixProposal(**block.input)
+    tool_calls = response.choices[0].message.tool_calls or []
+    for call in tool_calls:
+        if call.function.name == "submit_fix":
+            return FixProposal(**json.loads(call.function.arguments))
     raise FixBotError("model did not return a submit_fix tool call")
 
 

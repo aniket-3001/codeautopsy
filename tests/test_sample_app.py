@@ -87,3 +87,63 @@ def test_blast_radius_increments_across_repeated_crashes(monkeypatch):
         client.post("/checkout", json={"discount_code": "bad"})
 
     assert calls == [1, 2, 3]
+
+
+def test_deployed_commit_sha_prefers_env_var(monkeypatch):
+    monkeypatch.setenv("CODEAUTOPSY_COMMIT_SHA", "pinned-sha-from-container")
+    assert sample_main._deployed_commit_sha() == "pinned-sha-from-container"
+
+
+def test_deployed_commit_sha_falls_back_to_unknown_when_git_unavailable(monkeypatch):
+    monkeypatch.delenv("CODEAUTOPSY_COMMIT_SHA", raising=False)
+
+    def _raise(*args, **kwargs):
+        raise FileNotFoundError("git not installed")
+
+    monkeypatch.setattr(sample_main.subprocess, "run", _raise)
+    assert sample_main._deployed_commit_sha() == "unknown"
+
+
+def test_checkout_crash_outside_repo_root_falls_back_to_filename(monkeypatch):
+    """When the crashing frame's file isn't under REPO_ROOT, relative_to() raises ValueError
+    and the handler falls back to just the bare filename instead of a repo-relative path.
+    """
+
+    def fake_parse_discount(code: str) -> int:
+        raise ValueError("boom from elsewhere")
+
+    monkeypatch.setattr(sample_main, "parse_discount", fake_parse_discount)
+
+    captured = {}
+
+    def fake_autopsy(exc, *, commit_sha, file_path, line, blast_radius=1, settings=None, **_kwargs):
+        captured["file_path"] = file_path
+        return ResolveResponse(resolved=False, detail="test stub")
+
+    monkeypatch.setattr(sample_main, "autopsy_exception", fake_autopsy)
+    monkeypatch.setattr(
+        sample_main.traceback,
+        "extract_tb",
+        lambda tb: [type("Frame", (), {"filename": "/outside/repo/elsewhere.py", "lineno": 7})()],
+    )
+
+    client = TestClient(sample_main.app)
+    r = client.post("/checkout", json={"discount_code": "bad"})
+
+    assert r.status_code == 500
+    assert captured["file_path"] == "elsewhere.py"
+
+
+def test_run_binds_uvicorn_to_all_interfaces_on_port_8000(monkeypatch):
+    calls = {}
+
+    def fake_run(app, host, port):
+        calls["host"] = host
+        calls["port"] = port
+
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    sample_main.run()
+
+    assert calls == {"host": "0.0.0.0", "port": 8000}

@@ -1,12 +1,13 @@
 """Tests for the Fix Bot: genealogy assembly, structured-output parsing, and the full
 apply -> verify -> commit loop against a real (temporary) git repo.
 
-The Anthropic call is always mocked — these tests prove the mechanism (git safety, the
+The Groq call is always mocked — these tests prove the mechanism (git safety, the
 verify-before-commit gate, branch hygiene), not the model's judgment.
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -17,9 +18,11 @@ from codeautopsy.enricher.incidents import append_incident
 from codeautopsy.fixbot.core import (
     FixBotError,
     build_genealogy,
+    open_pull_request,
     propose_fix,
     run_fixbot,
 )
+from codeautopsy.fixbot.core import _git as _core_git
 from codeautopsy.fixbot.models import FixProposal
 from codeautopsy.provenance.models import ProvenanceRecord, ResolveResponse
 
@@ -77,7 +80,7 @@ def _init_repo(tmp_path: Path) -> Path:
 
 def _settings_for(repo: Path) -> Settings:
     return Settings(
-        ANTHROPIC_API_KEY="test-key",
+        GROQ_API_KEY="test-key",
         CODEAUTOPSY_TARGET_REPO=str(repo),
         CODEAUTOPSY_PROVENANCE_DB=str(repo / "provenance.db"),
     )
@@ -141,43 +144,60 @@ def test_build_genealogy_missing_file_raises(tmp_path: Path, monkeypatch):
 # --- propose_fix (mocked model) --------------------------------------------------------------
 
 
-class _FakeBlock:
+class _FakeFunction:
     def __init__(self, input_: dict):
-        self.type = "tool_use"
         self.name = "submit_fix"
-        self.input = input_
+        self.arguments = json.dumps(input_)
+
+
+class _FakeToolCall:
+    def __init__(self, input_: dict):
+        self.function = _FakeFunction(input_)
 
 
 class _FakeMessage:
     def __init__(self, input_: dict):
-        self.content = [_FakeBlock(input_)]
+        self.tool_calls = [_FakeToolCall(input_)]
 
 
-class _FakeMessages:
+class _FakeChoice:
+    def __init__(self, input_: dict):
+        self.message = _FakeMessage(input_)
+
+
+class _FakeCompletion:
+    def __init__(self, input_: dict):
+        self.choices = [_FakeChoice(input_)]
+
+
+class _FakeCompletions:
     def __init__(self, input_: dict):
         self._input = input_
 
     def create(self, **kwargs):
-        return _FakeMessage(self._input)
+        return _FakeCompletion(self._input)
 
 
-class _FakeAnthropicClient:
+class _FakeChat:
+    def __init__(self, input_: dict):
+        self.completions = _FakeCompletions(input_)
+
+
+class _FakeGroqClient:
     def __init__(self, input_: dict, **kwargs):
-        self.messages = _FakeMessages(input_)
+        self.chat = _FakeChat(input_)
 
 
-def _patch_anthropic(monkeypatch, proposal_input: dict):
-    import anthropic
+def _patch_groq(monkeypatch, proposal_input: dict):
+    import groq
 
-    monkeypatch.setattr(
-        anthropic, "Anthropic", lambda **kwargs: _FakeAnthropicClient(proposal_input)
-    )
+    monkeypatch.setattr(groq, "Groq", lambda **kwargs: _FakeGroqClient(proposal_input))
 
 
 def test_propose_fix_parses_tool_use_response(tmp_path: Path, monkeypatch):
     repo = _init_repo(tmp_path)
     settings = _settings_for(repo)
-    _patch_anthropic(
+    _patch_groq(
         monkeypatch,
         {
             "explanation": "validate before parsing",
@@ -198,7 +218,7 @@ def test_propose_fix_parses_tool_use_response(tmp_path: Path, monkeypatch):
 def test_propose_fix_requires_api_key(tmp_path: Path):
     repo = _init_repo(tmp_path)
     settings = Settings(
-        ANTHROPIC_API_KEY=None,
+        GROQ_API_KEY=None,
         CODEAUTOPSY_TARGET_REPO=str(repo),
         CODEAUTOPSY_PROVENANCE_DB=str(repo / "provenance.db"),
     )
@@ -229,7 +249,7 @@ def _stub_run(monkeypatch, repo: Path, head: str, proposal_input: dict):
         "codeautopsy.fixbot.core.resolve_decision",
         lambda *a, **k: ResolveResponse(resolved=True, introducing_commit=head, record=rec),
     )
-    _patch_anthropic(monkeypatch, proposal_input)
+    _patch_groq(monkeypatch, proposal_input)
 
 
 def test_run_fixbot_verified_fix_commits_and_restores_branch(tmp_path: Path, monkeypatch):
@@ -258,12 +278,16 @@ def test_run_fixbot_verified_fix_commits_and_restores_branch(tmp_path: Path, mon
     # Working tree must be restored to the original branch, untouched.
     assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == original_branch
     assert _git(repo, "status", "--porcelain") == ""
-    assert (repo / "app.py").read_text(encoding="utf-8") == BUGGY_SOURCE  # unchanged on original branch
+    assert (repo / "app.py").read_text(
+        encoding="utf-8"
+    ) == BUGGY_SOURCE  # unchanged on original branch
 
     # But the fix branch really has the patch + a passing regression test.
     fixed_on_branch = subprocess.run(
         ["git", "-C", str(repo), "show", f"{result.branch}:app.py"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     assert "isdigit" in fixed_on_branch
 
@@ -305,3 +329,146 @@ def test_run_fixbot_refuses_dirty_worktree(tmp_path: Path, monkeypatch):
     assert result.verified is False
     assert "not clean" in result.detail
     assert (repo / "scratch.txt").exists()  # untouched, not deleted
+
+
+# --- _git error path, propose_fix mismatch, open_pull_request -------------------------------
+
+
+def test_git_helper_raises_fixboterror_on_failure(tmp_path: Path):
+    with pytest.raises(FixBotError):
+        _core_git(tmp_path, "not-a-real-git-command")
+
+
+def test_propose_fix_raises_when_model_never_calls_submit_fix(tmp_path: Path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    settings = _settings_for(repo)
+
+    class _NoToolCallMessage:
+        tool_calls = []
+
+    class _NoToolCallChoice:
+        message = _NoToolCallMessage()
+
+    class _NoToolCallCompletion:
+        choices = [_NoToolCallChoice()]
+
+    class _NoToolCallCompletions:
+        def create(self, **kwargs):
+            return _NoToolCallCompletion()
+
+    class _NoToolCallChat:
+        completions = _NoToolCallCompletions()
+
+    class _NoToolCallClient:
+        def __init__(self, **kwargs):
+            self.chat = _NoToolCallChat()
+
+    import groq
+
+    monkeypatch.setattr(groq, "Groq", lambda **kwargs: _NoToolCallClient())
+
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
+    with pytest.raises(FixBotError, match="submit_fix"):
+        propose_fix(genealogy, settings)
+
+
+def test_open_pull_request_returns_none_without_remote(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    assert open_pull_request(repo, "some-branch", title="t", body="b") is None
+
+
+def test_open_pull_request_returns_none_when_gh_unavailable(tmp_path: Path, monkeypatch):
+    """Remote is configured and the push succeeds, but `gh` isn't installed/authenticated —
+    open_pull_request must degrade to None rather than raising.
+    """
+    repo = _init_repo(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "checkout", "-b", "fix-branch")
+    (repo / "app.py").write_text(FIXED_SOURCE, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "fix")
+
+    import codeautopsy.fixbot.core as core_module
+
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "gh":
+            return subprocess.CompletedProcess(
+                cmd, returncode=1, stdout="", stderr="gh: not authenticated"
+            )
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(core_module.subprocess, "run", fake_run)
+
+    result = open_pull_request(repo, "fix-branch", title="t", body="b")
+
+    assert result is None
+
+
+def test_open_pull_request_returns_none_when_push_fails(tmp_path: Path):
+    """Remote is configured but unreachable — `git push` itself fails (raises FixBotError
+    from the _git helper), which open_pull_request must swallow and degrade to None.
+    """
+    repo = _init_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", str(tmp_path / "does-not-exist.git"))
+    _git(repo, "checkout", "-b", "fix-branch")
+
+    result = open_pull_request(repo, "fix-branch", title="t", body="b")
+
+    assert result is None
+
+
+def test_open_pull_request_returns_pr_url_on_success(tmp_path: Path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "checkout", "-b", "fix-branch")
+    (repo / "app.py").write_text(FIXED_SOURCE, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "fix")
+
+    import codeautopsy.fixbot.core as core_module
+
+    real_run = subprocess.run
+    pr_url = "https://github.com/example/repo/pull/1"
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "gh":
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout=pr_url + "\n", stderr="")
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(core_module.subprocess, "run", fake_run)
+
+    result = open_pull_request(repo, "fix-branch", title="t", body="b")
+
+    assert result == pr_url
+
+
+def test_run_fixbot_push_true_without_remote_stays_committed_locally(tmp_path: Path, monkeypatch):
+    """push=True still succeeds locally when there's no remote configured — open_pull_request
+    degrades to None rather than raising, and the fix is left committed either way.
+    """
+    repo = _init_repo(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    _stub_run(
+        monkeypatch,
+        repo,
+        head,
+        {
+            "explanation": "validate before parsing",
+            "fixed_file_content": FIXED_SOURCE,
+            "regression_test_code": REGRESSION_TEST,
+            "lesson": "always validate external input before int()",
+        },
+    )
+
+    result = run_fixbot(_settings_for(repo), head, "app.py", 2, push=True)
+
+    assert result.verified is True
+    assert result.pr_url is None

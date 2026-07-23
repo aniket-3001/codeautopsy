@@ -1,0 +1,40 @@
+services:
+  provenance:
+    build: .
+    image: codeautopsy:latest
+    command: codeautopsy-provenance
+    ports:
+      - "8100:8100"
+    environment:
+      CODEAUTOPSY_PROVENANCE_URL: http://0.0.0.0:8100
+      CODEAUTOPSY_PROVENANCE_DB: /data/provenance.db
+      CODEAUTOPSY_TARGET_REPO: /app
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}
+      SIGNOZ_INGESTION_KEY: ${SIGNOZ_INGESTION_KEY:-}
+    volumes:
+      - provenance-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  sample-app:
+    build: .
+    image: codeautopsy:latest
+    command: codeautopsy-sample
+    ports:
+      - "8000:8000"
+    environment:
+      CODEAUTOPSY_PROVENANCE_URL: http://provenance:8100
+      CODEAUTOPSY_RUNTIME_SERVICE: checkout-api
+      CODEAUTOPSY_TARGET_REPO: /app
+      CODEAUTOPSY_COMMIT_SHA: ${CODEAUTOPSY_COMMIT_SHA:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}
+      SIGNOZ_INGESTION_KEY: ${SIGNOZ_INGESTION_KEY:-}
+    depends_on:
+      provenance:
+        condition: service_healthy
+
+volumes:
+  provenance-data:

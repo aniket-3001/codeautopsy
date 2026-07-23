@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from codeautopsy.enricher.core import CAUSE_OF_DEATH_BY_EXC, autopsy_exception
-from codeautopsy.enricher.incidents import latest_incident_for, read_incidents
+from codeautopsy.config import Settings
+from codeautopsy.enricher.core import CAUSE_OF_DEATH_BY_EXC, autopsy_exception, resolve_decision
+from codeautopsy.enricher.incidents import latest_incident_for, read_incidents, record_incident
 from codeautopsy.provenance.models import ProvenanceRecord, ResolveResponse
 
 
@@ -180,3 +182,56 @@ def test_autopsy_exception_no_incident_without_repo_root(monkeypatch, tmp_path: 
         autopsy_exception(exc, commit_sha="x", file_path="f.py", line=1, tracer_provider=provider)
 
     assert read_incidents(tmp_path) == []
+
+
+def test_record_incident_swallows_oserror(tmp_path: Path, monkeypatch):
+    """record_incident is called from a live exception-handling path — a full disk or a
+    permissions problem writing the incident log must never raise a second exception.
+    """
+    monkeypatch.setattr(
+        "codeautopsy.enricher.incidents.append_incident",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    record_incident(
+        tmp_path,
+        file_path="f.py",
+        line=1,
+        exc_type="ValueError",
+        exc_message="boom",
+        cause_of_death="invalid value",
+        resolved=False,
+        provenance=None,
+        context=None,
+        blast_radius=1,
+    )  # must not raise
+
+
+def test_resolve_decision_returns_parsed_response_on_success(monkeypatch):
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"resolved": True, "introducing_commit": "abc123", "detail": "ok"}
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse())
+    settings = Settings(CODEAUTOPSY_PROVENANCE_URL="http://localhost:8100")
+
+    resp = resolve_decision(settings, "abc123", "f.py", 1)
+
+    assert resp.resolved is True
+    assert resp.introducing_commit == "abc123"
+
+
+def test_resolve_decision_returns_unresolved_when_provenance_service_unreachable(monkeypatch):
+    def _raise(*args, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "post", _raise)
+    settings = Settings(CODEAUTOPSY_PROVENANCE_URL="http://localhost:59999")
+
+    resp = resolve_decision(settings, "abc123", "f.py", 1)
+
+    assert resp.resolved is False
+    assert "provenance service unreachable" in resp.detail
