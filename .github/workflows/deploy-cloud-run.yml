@@ -64,5 +64,6 @@ jobs:
             --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} \
             --command=codeautopsy-sample \
             --port=8000 --memory=512Mi \
-            --set-env-vars="CODEAUTOPSY_PROVENANCE_URL=${{ steps.provenance.outputs.url }},CODEAUTOPSY_TARGET_REPO=/app,CODEAUTOPSY_RUNTIME_SERVICE=checkout-api" \
+            --set-secrets="SIGNOZ_INGESTION_KEY=codeautopsy-signoz-ingestion-key:latest" \
+            --set-env-vars="CODEAUTOPSY_PROVENANCE_URL=${{ steps.provenance.outputs.url }},CODEAUTOPSY_TARGET_REPO=/app,CODEAUTOPSY_RUNTIME_SERVICE=checkout-api,OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.in2.signoz.cloud:443" \
             --allow-unauthenticated --quiet

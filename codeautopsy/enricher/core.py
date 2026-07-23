@@ -127,6 +127,15 @@ def autopsy_exception(
 
     span.end()
 
+    # Cloud Run only guarantees CPU while a request is in flight — the BatchSpanProcessor's
+    # background export thread can get frozen before it flushes once this response returns.
+    # Force the flush now, inside the request's CPU-active window, so the crash span is
+    # actually on the wire before autopsy_exception() hands back to the caller.
+    provider = tracer_provider or trace.get_tracer_provider()
+    force_flush = getattr(provider, "force_flush", None)
+    if force_flush is not None:
+        force_flush(timeout_millis=3000)
+
     if repo_root is not None:
         record_incident(
             repo_root,
