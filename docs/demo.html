@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeAutopsy — live sandbox demo</title>
+<meta name="description" content="Trigger a real production crash, submit the AI decision that caused it, then watch CodeAutopsy resolve the crash back to that decision — live, against the real deployed APIs.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2.4' stroke-linecap='round'><path d='M4 12h6'/><path d='M14 12h6'/><circle cx='11' cy='12' r='2' fill='%2322d3ee' stroke='none'/><circle cx='17' cy='6' r='2' fill='%236366f1' stroke='none'/><path d='M13 10.5 15.5 7.5' stroke='%236366f1'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --color-zinc-50:#f5f7fa; --color-zinc-100:#eef1f6; --color-zinc-200:#e0e5ee; --color-zinc-300:#cbd3e1;
+    --color-zinc-400:#93a0b5; --color-zinc-500:#64718a; --color-zinc-600:#475066; --color-zinc-700:#353d50;
+    --color-zinc-800:#222838; --color-zinc-900:#161b28; --color-zinc-950:#0d1119;
+  }
+  body{font-family:'Geist',system-ui,sans-serif}
+  .serif{font-family:'Instrument Serif','Spectral',Georgia,serif;font-weight:400}
+  .mono{font-family:'Geist Mono',ui-monospace,monospace}
+  a:focus-visible,button:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:5px}
+  .grad{background:linear-gradient(90deg,#0891b2,#4f46e5);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+  .dark .grad{background:linear-gradient(90deg,#22d3ee,#6366f1);-webkit-background-clip:text;background-clip:text}
+  .bg-grid{background-image:radial-gradient(rgba(100,116,139,.13) 1px,transparent 1px);background-size:26px 26px}
+  .dark .bg-grid{background-image:radial-gradient(rgba(148,163,184,.07) 1px,transparent 1px)}
+  .step{transition:opacity .3s ease}
+  .step[data-locked="true"]{opacity:.45;pointer-events:none}
+  textarea,input,select{background:transparent}
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.35}}
+  .pulse{animation:pulse-dot 1.4s ease-in-out infinite}
+</style>
+</head>
+<body class="bg-[#f6f8fc] text-slate-900 antialiased dark:bg-[#0a0e1a] dark:text-slate-100">
+<div aria-hidden="true" class="bg-grid fixed inset-0 -z-10"></div>
+
+<header class="sticky top-0 z-20 border-b border-zinc-300/70 bg-[#f4f7fc]/80 backdrop-blur dark:border-zinc-900 dark:bg-[#0a0e1a]/75">
+  <div class="mx-auto flex max-w-4xl items-center justify-between px-5 py-3.5">
+    <a href="index.html" class="flex items-center gap-2">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h6" stroke="#6366f1" stroke-width="2.4" stroke-linecap="round"/><path d="M14 12h6" stroke="#22d3ee" stroke-width="2.4" stroke-linecap="round"/><circle cx="11" cy="12" r="2.1" fill="#6366f1"/><circle cx="17" cy="6" r="2.1" fill="#22d3ee"/></svg>
+      <span class="serif text-xl leading-none tracking-tight">CodeAutopsy</span>
+    </a>
+    <a href="index.html" class="text-sm font-medium text-zinc-500 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">← Back</a>
+  </div>
+</header>
+
+<main class="mx-auto max-w-3xl px-5 py-14">
+
+  <div class="text-center">
+    <div class="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+      <span id="live-dot" class="h-1.5 w-1.5 rounded-full bg-zinc-400"></span>
+      <span class="mono" id="live-label">checking live services…</span>
+    </div>
+    <h1 class="serif text-4xl leading-tight sm:text-5xl">Break it. Explain it. <span class="grad italic">Watch it heal.</span></h1>
+    <p class="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">This isn't a mockup — every button below hits the real <span class="mono">checkout-api</span> and provenance service running on Cloud Run right now. You are the AI agent whose decision gets blamed.</p>
+  </div>
+
+  <!-- STEP 1 -->
+  <section class="step mt-12 rounded-2xl border border-zinc-300 bg-white/60 p-6 backdrop-blur dark:border-zinc-800 dark:bg-[#0b1018]/60" id="step1">
+    <div class="flex items-center gap-3">
+      <span class="mono grid h-7 w-7 shrink-0 place-items-center rounded-full bg-zinc-950 text-xs text-white dark:bg-white dark:text-black">1</span>
+      <div>
+        <div class="font-medium">Crash the checkout API</div>
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">Sends a non-numeric discount code — the seeded bug in <span class="mono">parse_discount()</span> has no input validation.</p>
+      </div>
+    </div>
+    <button id="btn-crash" class="mono mt-4 rounded-xl bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200">POST /checkout {"discount_code":"garbage"}</button>
+    <pre id="out-crash" class="mono mt-4 hidden overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs leading-6 dark:border-zinc-800 dark:bg-black/40"></pre>
+  </section>
+
+  <!-- STEP 2 -->
+  <section class="step mt-5 rounded-2xl border border-zinc-300 bg-white/60 p-6 backdrop-blur dark:border-zinc-800 dark:bg-[#0b1018]/60" id="step2" data-locked="true">
+    <div class="flex items-center gap-3">
+      <span class="mono grid h-7 w-7 shrink-0 place-items-center rounded-full bg-zinc-950 text-xs text-white dark:bg-white dark:text-black">2</span>
+      <div>
+        <div class="font-medium">Confess as the AI agent</div>
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">Submit the reasoning that "wrote" line 92 of <span class="mono">sample_app/main.py</span> — this is exactly what the Recorder captures automatically from a real Claude Code session.</p>
+      </div>
+    </div>
+    <div class="mt-4 grid gap-3">
+      <label class="block">
+        <span class="mono text-[11px] uppercase tracking-wider text-zinc-400">reasoning_summary</span>
+        <textarea id="in-summary" rows="2" class="mt-1 w-full rounded-lg border border-zinc-300 p-2.5 text-sm dark:border-zinc-700" placeholder="e.g. assuming discount_code is always a clean integer string">assuming discount_code is always a clean integer string — no time to add validation before the demo</textarea>
+      </label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block">
+          <span class="mono text-[11px] uppercase tracking-wider text-zinc-400">model</span>
+          <input id="in-model" class="mt-1 w-full rounded-lg border border-zinc-300 p-2.5 text-sm dark:border-zinc-700" value="claude-sonnet-5">
+        </label>
+        <label class="block">
+          <span class="mono text-[11px] uppercase tracking-wider text-zinc-400">risk_flags</span>
+          <input id="in-risk" class="mt-1 w-full rounded-lg border border-zinc-300 p-2.5 text-sm dark:border-zinc-700" value="assumed_valid_input">
+        </label>
+      </div>
+    </div>
+    <button id="btn-submit" class="mono mt-4 rounded-xl bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200">POST /provenance</button>
+    <pre id="out-submit" class="mono mt-4 hidden overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs leading-6 dark:border-zinc-800 dark:bg-black/40"></pre>
+  </section>
+
+  <!-- STEP 3 -->
+  <section class="step mt-5 rounded-2xl border border-zinc-300 bg-white/60 p-6 backdrop-blur dark:border-zinc-800 dark:bg-[#0b1018]/60" id="step3" data-locked="true">
+    <div class="flex items-center gap-3">
+      <span class="mono grid h-7 w-7 shrink-0 place-items-center rounded-full bg-zinc-950 text-xs text-white dark:bg-white dark:text-black">3</span>
+      <div>
+        <div class="font-medium">Crash it again</div>
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">Same request as step 1. This time the autopsy resolves — because your decision is now indexed against this exact commit and line.</p>
+      </div>
+    </div>
+    <button id="btn-crash2" class="mono mt-4 rounded-xl bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:-translate-y-0.5 hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200">POST /checkout {"discount_code":"garbage"}</button>
+    <pre id="out-crash2" class="mono mt-4 hidden overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs leading-6 dark:border-zinc-800 dark:bg-black/40"></pre>
+    <div id="win" class="mt-4 hidden rounded-xl border border-emerald-400/40 bg-emerald-400/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+      <span class="font-medium">Resolved.</span> The crash now carries your reasoning and risk flags straight from the decision that caused it — this is the span link CodeAutopsy mints in SigNoz, made visible here as plain JSON.
+    </div>
+  </section>
+
+  <p class="mt-8 text-center text-xs text-zinc-400 dark:text-zinc-600">Persisted in Cloud SQL (Postgres) — this record outlives redeploys, same as it would in a real incident history.</p>
+
+</main>
+
+<footer class="border-t border-zinc-300/70 px-5 py-10 text-center text-xs text-zinc-400 dark:border-zinc-900 dark:text-zinc-600">
+  <p>Built for the WeMakeDevs × SigNoz hackathon — Track 3 · Agents of SigNoz.</p>
+</footer>
+
+<script>
+const SAMPLE_APP = "https://codeautopsy-sample-app-3bczbiamba-uc.a.run.app";
+const PROVENANCE = "https://codeautopsy-provenance-3bczbiamba-uc.a.run.app";
+const FILE_PATH = "codeautopsy/sample_app/main.py";
+const LINE = 92;
+
+let commitSha = null;
+
+function hex(n) {
+  let s = "";
+  while (s.length < n) s += Math.floor(Math.random() * 16).toString(16);
+  return s.slice(0, n);
+}
+
+function unlock(id) {
+  document.getElementById(id).dataset.locked = "false";
+}
+
+function show(id, obj) {
+  const el = document.getElementById(id);
+  el.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  el.classList.remove("hidden");
+}
+
+async function refreshLiveStatus() {
+  const dot = document.getElementById("live-dot");
+  const label = document.getElementById("live-label");
+  try {
+    const r = await fetch(SAMPLE_APP + "/health");
+    const data = await r.json();
+    commitSha = data.commit;
+    dot.className = "h-1.5 w-1.5 rounded-full bg-emerald-400 pulse";
+    label.textContent = "live · checkout-api @ " + commitSha.slice(0, 8);
+  } catch (e) {
+    dot.className = "h-1.5 w-1.5 rounded-full bg-red-400";
+    label.textContent = "sample app unreachable — CORS or cold start? try again";
+  }
+}
+
+async function crash(outId) {
+  const r = await fetch(SAMPLE_APP + "/checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ discount_code: "garbage", subtotal: 100 }),
+  });
+  const data = await r.json();
+  show(outId, { http_status: r.status, ...data.detail });
+  return data.detail && data.detail.codeautopsy;
+}
+
+document.getElementById("btn-crash").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  const codeautopsy = await crash("out-crash");
+  e.target.disabled = false;
+  if (codeautopsy && codeautopsy.resolved === false) unlock("step2");
+});
+
+document.getElementById("btn-submit").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  const risk_flags = document.getElementById("in-risk").value.split(",").map(s => s.trim()).filter(Boolean);
+  const record = {
+    commit_sha: commitSha,
+    file_path: FILE_PATH,
+    line_start: LINE,
+    line_end: LINE,
+    decision_span_id: hex(16),
+    decision_trace_id: hex(32),
+    session_id: "demo_" + hex(8),
+    reasoning_summary: document.getElementById("in-summary").value,
+    risk_flags,
+    model: document.getElementById("in-model").value,
+    tool: "live-sandbox-demo",
+    decision_id: "dec_demo_" + hex(8),
+  };
+  try {
+    const r = await fetch(PROVENANCE + "/provenance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(record),
+    });
+    const data = await r.json();
+    show("out-submit", { http_status: r.status, ...data });
+    if (r.ok) unlock("step3");
+  } catch (err) {
+    show("out-submit", "request failed: " + err);
+  }
+  e.target.disabled = false;
+});
+
+document.getElementById("btn-crash2").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  const codeautopsy = await crash("out-crash2");
+  e.target.disabled = false;
+  if (codeautopsy && codeautopsy.resolved === true) {
+    document.getElementById("win").classList.remove("hidden");
+  }
+});
+
+refreshLiveStatus();
+</script>
+</body>
+</html>

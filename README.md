@@ -11,6 +11,7 @@ correlation to walk from **crash → cause of death → the AI's original decisi
 Built for the **WeMakeDevs × SigNoz** hackathon (Track 3 · Agents of SigNoz).
 
 **Live:** [landing page](https://aniket-3001.github.io/codeautopsy/) ·
+[**try the sandbox demo**](https://aniket-3001.github.io/codeautopsy/demo.html) ·
 [sample app](https://codeautopsy-sample-app-182653908302.us-central1.run.app/health) ·
 [provenance API](https://codeautopsy-provenance-182653908302.us-central1.run.app/health)
 
@@ -47,6 +48,8 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 - ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test on every
   push, image published to GHCR on `main`, landing page deployed via GitHub Pages.
 - ✅ Live on Google Cloud Run (see [Deployment](#deployment) below) — provenance + sample app
+- ✅ Persistent store — provenance data lives in Cloud SQL (Postgres) and survives redeploys
+- ✅ Interactive [sandbox demo](https://aniket-3001.github.io/codeautopsy/demo.html) — trigger the real bug, submit a decision, watch it resolve, live
   deployed and validated end-to-end on real infra, redeployed automatically on every push to
   `main`.
 - 🚧 Stretch: fully-automatic loop via SigNoz alert webhook; self-learning lesson write-back
@@ -61,7 +64,7 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 | Component | Path | Role |
 |---|---|---|
 | Recorder | `codeautopsy/recorder/` | Claude Code hooks → dev-time decision spans + risk flags |
-| Provenance | `codeautopsy/provenance/` | SQLite store + git-blame indexer + `resolve` API |
+| Provenance | `codeautopsy/provenance/` | SQLite (default) or Postgres (`DATABASE_URL`) store + git-blame indexer + `resolve` API |
 | Sample app | `codeautopsy/sample_app/` | Instrumented FastAPI "patient" with a seeded bug |
 | Enricher | `codeautopsy/enricher/` | On exception, mints the linked `codeautopsy.autopsy` span |
 | Coroner CLI | `codeautopsy/cli/` | `codeautopsy autopsy <trace>` — the chain of custody |
@@ -111,6 +114,8 @@ GitHub Actions (`.github/workflows/`):
 
 - **`ci.yml`** — on every push/PR to `main`: editable install, `ruff check`, `mypy`, `pytest`
   with coverage (`fail_under = 95`, see `pyproject.toml`), coverage XML uploaded as an artifact.
+  Runs a `postgres:16` service container so `tests/test_provenance_postgres.py` exercises the
+  real Postgres backend (skipped locally when `DATABASE_URL` isn't set).
 - **`docker-publish.yml`** — on push to `main` (or manual dispatch): builds the image and
   publishes it to GHCR (`ghcr.io/<owner>/<repo>`), tagged by commit SHA and `latest`.
 - **`pages.yml`** — on push to `main` touching `docs/`: deploys `docs/index.html` to GitHub
@@ -124,7 +129,7 @@ GitHub Actions (`.github/workflows/`):
 Live on Google Cloud Run, project `codeautopsy-hackathon`, region `us-central1`:
 
 - **Provenance**: https://codeautopsy-provenance-182653908302.us-central1.run.app
-  (`min-instances=1` so the SQLite-backed `resolve` API stays warm for a demo)
+  (`min-instances=1` so the `resolve` API stays warm for a demo)
 - **Sample app**: https://codeautopsy-sample-app-182653908302.us-central1.run.app
   (points its `CODEAUTOPSY_PROVENANCE_URL` at the provenance service above)
 
@@ -132,10 +137,13 @@ Live on Google Cloud Run, project `codeautopsy-hackathon`, region `us-central1`:
 curl https://codeautopsy-sample-app-182653908302.us-central1.run.app/health
 ```
 
-**Known limitation:** `provenance.db` is SQLite on local container disk, so it resets whenever
-Cloud Run starts a fresh revision (including on every CI/CD redeploy). Fine for a hackathon demo
-of the join mechanism; a persistent deployment would move this to Cloud SQL or a mounted GCS
-volume.
+**Persistence:** the provenance service is backed by Cloud SQL (Postgres, instance
+`codeautopsy-db`), connected via the Cloud SQL Auth Proxy socket (`--add-cloudsql-instances`)
+with the DSN injected from Secret Manager (`--set-secrets=DATABASE_URL=...`) — never as a
+plaintext env var. Data survives redeploys; verified by submitting a record, forcing a fresh
+Cloud Run revision, and confirming it's still there. Local dev and the test suite still default
+to the zero-config SQLite store (`ProvenanceStore` in `codeautopsy/provenance/store.py`) unless
+`DATABASE_URL` is set.
 
 To reproduce the deploy manually (e.g. onto a different GCP project):
 
