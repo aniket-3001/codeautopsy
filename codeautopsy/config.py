@@ -58,6 +58,18 @@ class Settings(BaseSettings):
     # --- Repo under observation ---------------------------------------------------
     target_repo: Path = Field(default=PROJECT_ROOT, alias="CODEAUTOPSY_TARGET_REPO")
 
+    # --- Accounts / multi-tenant SaaS (M1) ------------------------------------------
+    accounts_db: Path = Field(
+        default=PROJECT_ROOT / "accounts.db", alias="CODEAUTOPSY_ACCOUNTS_DB"
+    )
+    jwt_secret: str = Field(
+        default="dev-only-insecure-secret-change-me",
+        alias="JWT_SECRET",
+        description="HS256 signing secret for dashboard session tokens. Must be overridden "
+        "(via Secret Manager) in any deployed environment.",
+    )
+    jwt_expires_seconds: int = Field(default=86400, alias="JWT_EXPIRES_SECONDS")
+
     # --- Fix Bot --------------------------------------------------------------------
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
     fixbot_model: str = Field(default="llama-3.3-70b-versatile", alias="CODEAUTOPSY_FIXBOT_MODEL")

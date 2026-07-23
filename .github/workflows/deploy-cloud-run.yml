@@ -46,7 +46,7 @@ jobs:
             --command=codeautopsy-provenance \
             --port=8100 --min-instances=1 --max-instances=1 --memory=512Mi \
             --add-cloudsql-instances=${{ env.CLOUDSQL_INSTANCE }} \
-            --set-secrets="DATABASE_URL=codeautopsy-database-url:latest" \
+            --set-secrets="DATABASE_URL=codeautopsy-database-url:latest,JWT_SECRET=codeautopsy-jwt-secret:latest" \
             --set-env-vars="CODEAUTOPSY_PROVENANCE_URL=http://0.0.0.0:8100,CODEAUTOPSY_TARGET_REPO=/app" \
             --allow-unauthenticated --quiet
 

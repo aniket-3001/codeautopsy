@@ -69,7 +69,10 @@ def blame_introducing_commit(
 
 
 def resolve(
-    store: ProvenanceStoreProtocol, req: ResolveRequest, repo: str | Path | None = None
+    store: ProvenanceStoreProtocol,
+    req: ResolveRequest,
+    repo: str | Path | None = None,
+    org_id: str = "demo-public",
 ) -> ResolveResponse:
     """Resolve a runtime file:line@commit back to the AI decision that wrote it.
 
@@ -77,9 +80,11 @@ def resolve(
       1. Try the deployed commit directly (fast path — recorder often tags the deploy SHA).
       2. Otherwise blame at the deployed commit to find the *introducing* commit, and match
          the decision recorded against that commit.
+
+    `org_id` scopes both lookups so a tenant can only ever resolve its own decisions.
     """
     # Fast path: a decision recorded directly against the deployed commit.
-    direct = store.find_by_line(req.commit_sha, req.file_path, req.line)
+    direct = store.find_by_line(req.commit_sha, req.file_path, req.line, org_id=org_id)
     if direct is not None:
         return ResolveResponse(
             resolved=True,
@@ -94,7 +99,7 @@ def resolve(
         origin = blame_origin(repo, req.file_path, req.line, req.commit_sha)
         if origin:
             introducing, orig_line = origin
-            rec = store.find_by_line(introducing, req.file_path, orig_line)
+            rec = store.find_by_line(introducing, req.file_path, orig_line, org_id=org_id)
             if rec is not None:
                 return ResolveResponse(
                     resolved=True,

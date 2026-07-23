@@ -22,15 +22,16 @@ class ProvenanceStoreProtocol(Protocol):
     def add(self, record: ProvenanceRecord) -> None: ...
     def add_many(self, records: list[ProvenanceRecord]) -> int: ...
     def find_by_line(
-        self, commit_sha: str, file_path: str, line: int
+        self, commit_sha: str, file_path: str, line: int, org_id: str = "demo-public"
     ) -> ProvenanceRecord | None: ...
-    def all(self) -> list[ProvenanceRecord]: ...
-    def count(self) -> int: ...
-    def delete(self, decision_id: str) -> int: ...
+    def all(self, org_id: str = "demo-public") -> list[ProvenanceRecord]: ...
+    def count(self, org_id: str | None = None) -> int: ...
+    def delete(self, decision_id: str, org_id: str | None = None) -> int: ...
 
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS provenance (
+    org_id            TEXT NOT NULL DEFAULT 'demo-public',
     commit_sha        TEXT NOT NULL,
     file_path         TEXT NOT NULL,
     line_start        INTEGER NOT NULL,
@@ -45,8 +46,6 @@ CREATE TABLE IF NOT EXISTS provenance (
     decision_id       TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_blame
-    ON provenance(commit_sha, file_path, line_start, line_end);
 CREATE INDEX IF NOT EXISTS idx_file ON provenance(file_path);
 """
 
@@ -69,6 +68,19 @@ class ProvenanceStore:
     def _init_schema(self) -> None:
         with self._conn() as conn:
             conn.executescript(_SCHEMA)
+            # Migration for pre-tenancy databases: add org_id if this table predates it, then
+            # rebuild idx_blame to include it (SQLite has no "ADD COLUMN IF NOT EXISTS").
+            try:
+                conn.execute(
+                    "ALTER TABLE provenance ADD COLUMN org_id TEXT NOT NULL DEFAULT 'demo-public'"
+                )
+            except sqlite3.OperationalError:
+                pass
+            conn.execute("DROP INDEX IF EXISTS idx_blame")
+            conn.execute(
+                "CREATE INDEX idx_blame "
+                "ON provenance(org_id, commit_sha, file_path, line_start, line_end)"
+            )
 
     # --- writes -------------------------------------------------------------------
     def add(self, record: ProvenanceRecord) -> None:
@@ -76,12 +88,13 @@ class ProvenanceStore:
             conn.execute(
                 """
                 INSERT INTO provenance (
-                    commit_sha, file_path, line_start, line_end,
+                    org_id, commit_sha, file_path, line_start, line_end,
                     decision_span_id, decision_trace_id, session_id,
                     reasoning_summary, risk_flags, model, tool, decision_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    record.org_id,
                     record.commit_sha,
                     record.file_path,
                     record.line_start,
@@ -110,33 +123,48 @@ class ProvenanceStore:
         data["risk_flags"] = json.loads(data.get("risk_flags") or "[]")
         return ProvenanceRecord(**data)
 
-    def find_by_line(self, commit_sha: str, file_path: str, line: int) -> ProvenanceRecord | None:
+    def find_by_line(
+        self, commit_sha: str, file_path: str, line: int, org_id: str = "demo-public"
+    ) -> ProvenanceRecord | None:
         """The core lookup: which decision's range contains this line at this commit?
 
         Returns the most recent matching decision (last writer wins) if several overlap.
+        Always scoped to `org_id` — a tenant can never resolve another tenant's decisions.
         """
         with self._conn() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM provenance
-                WHERE commit_sha = ? AND file_path = ?
+                WHERE org_id = ? AND commit_sha = ? AND file_path = ?
                   AND line_start <= ? AND line_end >= ?
                 ORDER BY created_at DESC
                 """,
-                (commit_sha, file_path, line, line),
+                (org_id, commit_sha, file_path, line, line),
             ).fetchall()
         return self._row_to_record(rows[0]) if rows else None
 
-    def all(self) -> list[ProvenanceRecord]:
+    def all(self, org_id: str = "demo-public") -> list[ProvenanceRecord]:
         with self._conn() as conn:
-            rows = conn.execute("SELECT * FROM provenance ORDER BY created_at").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM provenance WHERE org_id = ? ORDER BY created_at", (org_id,)
+            ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
-    def count(self) -> int:
+    def count(self, org_id: str | None = None) -> int:
         with self._conn() as conn:
-            return conn.execute("SELECT COUNT(*) FROM provenance").fetchone()[0]
+            if org_id is None:
+                return conn.execute("SELECT COUNT(*) FROM provenance").fetchone()[0]
+            return conn.execute(
+                "SELECT COUNT(*) FROM provenance WHERE org_id = ?", (org_id,)
+            ).fetchone()[0]
 
-    def delete(self, decision_id: str) -> int:
+    def delete(self, decision_id: str, org_id: str | None = None) -> int:
         with self._conn() as conn:
-            cur = conn.execute("DELETE FROM provenance WHERE decision_id = ?", (decision_id,))
+            if org_id is None:
+                cur = conn.execute("DELETE FROM provenance WHERE decision_id = ?", (decision_id,))
+            else:
+                cur = conn.execute(
+                    "DELETE FROM provenance WHERE decision_id = ? AND org_id = ?",
+                    (decision_id, org_id),
+                )
             return cur.rowcount

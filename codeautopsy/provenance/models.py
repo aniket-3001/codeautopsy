@@ -14,6 +14,10 @@ def _now() -> str:
 class ProvenanceRecord(BaseModel):
     """One row: an AI decision that authored a specific line range in a specific commit."""
 
+    # Tenant scope. Defaults to the shared public-demo tenant so the legacy unauthenticated
+    # sandbox (docs/demo.html) keeps working untouched; the authenticated /v1 API always sets
+    # this explicitly from the caller's org, never from client input.
+    org_id: str = "demo-public"
     commit_sha: str
     file_path: str
     line_start: int
