@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 
 from codeautopsy.provenance.models import ProvenanceRecord, ResolveRequest, ResolveResponse
-from codeautopsy.provenance.store import ProvenanceStore
+from codeautopsy.provenance.store import ProvenanceStoreProtocol
 
 
 class GitError(RuntimeError):
@@ -69,7 +69,7 @@ def blame_introducing_commit(
 
 
 def resolve(
-    store: ProvenanceStore, req: ResolveRequest, repo: str | Path | None = None
+    store: ProvenanceStoreProtocol, req: ResolveRequest, repo: str | Path | None = None
 ) -> ResolveResponse:
     """Resolve a runtime file:line@commit back to the AI decision that wrote it.
 
@@ -114,6 +114,6 @@ def resolve(
     return ResolveResponse(resolved=False, detail="no matching provenance and no repo to blame")
 
 
-def index_records(store: ProvenanceStore, records: list[ProvenanceRecord]) -> int:
+def index_records(store: ProvenanceStoreProtocol, records: list[ProvenanceRecord]) -> int:
     """Bulk-load decisions into the store (used by the recorder after a commit)."""
     return store.add_many(records)

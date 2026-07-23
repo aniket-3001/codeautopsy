@@ -13,6 +13,7 @@ import traceback
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import Status, StatusCode
@@ -60,6 +61,16 @@ trace.set_tracer_provider(_provider)
 tracer = trace.get_tracer("codeautopsy.sample_app")
 
 app = FastAPI(title="CodeAutopsy Sample App — checkout-api")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://aniket-3001.github.io",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 FastAPIInstrumentor.instrument_app(app)
 
 # Crude in-process blast-radius counter: how many times has THIS line crashed this run?

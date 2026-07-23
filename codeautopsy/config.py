@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     provenance_url: str = Field(
         default="http://localhost:8100", alias="CODEAUTOPSY_PROVENANCE_URL"
     )
+    database_url: str | None = Field(
+        default=None,
+        alias="DATABASE_URL",
+        description="Postgres DSN. When set, the provenance service persists here instead of "
+        "the local SQLite file — set in production so data survives Cloud Run redeploys.",
+    )
 
     # --- Repo under observation ---------------------------------------------------
     target_repo: Path = Field(default=PROJECT_ROOT, alias="CODEAUTOPSY_TARGET_REPO")

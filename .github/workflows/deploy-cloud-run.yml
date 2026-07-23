@@ -9,6 +9,7 @@ env:
   PROJECT_ID: codeautopsy-hackathon
   REGION: us-central1
   IMAGE: us-central1-docker.pkg.dev/codeautopsy-hackathon/codeautopsy/app
+  CLOUDSQL_INSTANCE: codeautopsy-hackathon:us-central1:codeautopsy-db
 
 permissions:
   contents: read
@@ -44,6 +45,8 @@ jobs:
             --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} \
             --command=codeautopsy-provenance \
             --port=8100 --min-instances=1 --max-instances=1 --memory=512Mi \
+            --add-cloudsql-instances=${{ env.CLOUDSQL_INSTANCE }} \
+            --set-secrets="DATABASE_URL=codeautopsy-database-url:latest" \
             --set-env-vars="CODEAUTOPSY_PROVENANCE_URL=http://0.0.0.0:8100,CODEAUTOPSY_TARGET_REPO=/app" \
             --allow-unauthenticated --quiet
 

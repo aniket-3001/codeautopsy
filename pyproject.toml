@@ -19,6 +19,7 @@ dependencies = [
     "opentelemetry-sdk>=1.25",
     "opentelemetry-exporter-otlp-proto-http>=1.25",
     "opentelemetry-instrumentation-fastapi>=0.46b0",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +64,10 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["codeautopsy"]
+# Only exercised when DATABASE_URL points at a real Postgres (CI's service container, or a
+# local one) — omitted from the gate so `pytest` without Postgres doesn't fail on coverage.
+# Correctness is verified by tests/test_provenance_postgres.py whenever DATABASE_URL is set.
+omit = ["codeautopsy/provenance/store_postgres.py"]
 
 [tool.coverage.report]
 fail_under = 95

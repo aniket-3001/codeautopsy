@@ -9,21 +9,44 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.provenance.indexer import resolve as resolve_provenance
 from codeautopsy.provenance.models import ProvenanceRecord, ResolveRequest, ResolveResponse
-from codeautopsy.provenance.store import ProvenanceStore
+from codeautopsy.provenance.store import ProvenanceStore, ProvenanceStoreProtocol
+
+# Public demo: the sandbox page (GitHub Pages) calls this service directly from the browser.
+DEMO_ORIGINS = [
+    "https://aniket-3001.github.io",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
+
+
+def _make_store(settings: Settings) -> ProvenanceStoreProtocol:
+    if settings.database_url:
+        from codeautopsy.provenance.store_postgres import PostgresProvenanceStore
+
+        return PostgresProvenanceStore(settings.database_url)
+    return ProvenanceStore(settings.provenance_db)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    store = ProvenanceStore(settings.provenance_db)
+    store = _make_store(settings)
     app = FastAPI(title="CodeAutopsy Provenance", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=DEMO_ORIGINS,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "records": store.count(), "db": str(settings.provenance_db)}
+        db = "postgres" if settings.database_url else str(settings.provenance_db)
+        return {"status": "ok", "records": store.count(), "db": db}
 
     @app.post("/provenance", status_code=201)
     def add(record: ProvenanceRecord) -> dict:

@@ -11,7 +11,9 @@ from codeautopsy.provenance.service import create_app, run
 
 
 def _client(tmp_path: Path) -> TestClient:
-    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    # DATABASE_URL=None pins these to the SQLite backend regardless of ambient env — CI sets
+    # DATABASE_URL globally for the Postgres-store tests, which would otherwise leak in here.
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"), DATABASE_URL=None)
     return TestClient(create_app(settings))
 
 

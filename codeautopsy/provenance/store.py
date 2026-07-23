@@ -11,8 +11,22 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Protocol
 
 from codeautopsy.provenance.models import ProvenanceRecord
+
+
+class ProvenanceStoreProtocol(Protocol):
+    """The tiny interface both the SQLite and Postgres backends satisfy."""
+
+    def add(self, record: ProvenanceRecord) -> None: ...
+    def add_many(self, records: list[ProvenanceRecord]) -> int: ...
+    def find_by_line(
+        self, commit_sha: str, file_path: str, line: int
+    ) -> ProvenanceRecord | None: ...
+    def all(self) -> list[ProvenanceRecord]: ...
+    def count(self) -> int: ...
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS provenance (
