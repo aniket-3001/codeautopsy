@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     @property
     def otel_headers(self) -> dict[str, str]:
         """Headers for OTLP export (SigNoz Cloud auth)."""
-        return {"signoz-ingestion-key": self.signoz_ingestion_key} if self.signoz_ingestion_key else {}
+        if self.signoz_ingestion_key:
+            return {"signoz-ingestion-key": self.signoz_ingestion_key}
+        return {}
 
     def traces_endpoint(self) -> str:
         return f"{self.otel_endpoint.rstrip('/')}/v1/traces"

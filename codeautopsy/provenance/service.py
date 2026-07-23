@@ -50,7 +50,7 @@ app = create_app()
 
 
 def run() -> None:
-    """Entry point: `codeautopsy-provenance`. Binds to the host/port in CODEAUTOPSY_PROVENANCE_URL."""
+    """Entry point: `codeautopsy-provenance`. Binds host/port from CODEAUTOPSY_PROVENANCE_URL."""
     import uvicorn
 
     settings = get_settings()

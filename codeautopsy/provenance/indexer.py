@@ -100,7 +100,10 @@ def resolve(
                     resolved=True,
                     introducing_commit=introducing,
                     record=rec,
-                    detail=f"matched via git blame to {introducing[:8]} at original line {orig_line}",
+                    detail=(
+                        f"matched via git blame to {introducing[:8]} "
+                        f"at original line {orig_line}"
+                    ),
                 )
             return ResolveResponse(
                 resolved=False,
