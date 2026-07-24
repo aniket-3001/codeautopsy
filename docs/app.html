@@ -57,6 +57,11 @@
 const API = "https://codeautopsy-provenance-3bczbiamba-uc.a.run.app";
 const SIGNOZ_CONSOLE = "https://mighty-bonefish.in2.signoz.cloud";
 const BLAST_RADIUS_DASHBOARD = `${SIGNOZ_CONSOLE}/dashboard/019f94fb-637b-794f-a675-62cf18335de0`;
+// In-app proof: SigNoz Cloud has no anonymous sharing, so judges hit a login wall on the live
+// links. These captured screenshots let them see the real trace + blast-radius dashboard with
+// zero login; the live deep-link stays as a labelled "login required" button inside the modal.
+const SIGNOZ_TRACE_SHOT = "assets/signoz-trace.png";
+const SIGNOZ_DASHBOARD_SHOT = "assets/signoz-blast-radius.png";
 
 // --- tiny auth-state helpers -------------------------------------------------------------
 function getToken() { return localStorage.getItem("ca_token"); }
@@ -184,12 +189,12 @@ function sparkBars(counts) {
 }
 
 // --- modal ------------------------------------------------------------------------------
-function openModal(html) {
+function openModal(html, { wide = false } = {}) {
   const root = document.getElementById("modal-root");
   root.innerHTML = `
     <div class="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" data-close></div>
     <div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8" data-close>
-      <div class="card w-full max-w-lg" data-stop>${html}</div>
+      <div class="card w-full ${wide ? "max-w-3xl" : "max-w-lg"}" data-stop>${html}</div>
     </div>`;
   root.querySelectorAll("[data-close]").forEach((el) =>
     el.addEventListener("click", (e) => { if (e.target === el) closeModal(); })
@@ -198,6 +203,48 @@ function openModal(html) {
   if (stop) stop.addEventListener("click", (e) => e.stopPropagation());
 }
 function closeModal() { document.getElementById("modal-root").innerHTML = ""; }
+
+// --- SigNoz proof modal -----------------------------------------------------------------
+// SigNoz Cloud requires a login to the tenant, so a raw deep-link dead-ends judges at a login
+// wall. This shows the captured screenshot in-app (zero login) and keeps the live link as a
+// clearly-labelled secondary action. Robust to the image not being committed yet.
+function openSigNozModal({ title, img, caption, liveHref, liveLabel }) {
+  openModal(`
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <p class="mono text-[11px] uppercase tracking-wider text-cyan-500">SigNoz · captured proof</p>
+        <h2 class="serif mt-1 text-2xl">${esc(title)}</h2>
+      </div>
+      <button data-close class="mono shrink-0 rounded-lg border border-zinc-300 px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">esc ✕</button>
+    </div>
+    ${caption ? `<p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">${esc(caption)}</p>` : ""}
+    <div class="mt-4 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <img id="signoz-proof-img" src="${img}" alt="${esc(title)}" class="block w-full" />
+    </div>
+    <a href="${liveHref}" target="_blank" rel="noopener" class="mono mt-4 flex items-center justify-center gap-2 rounded-xl border border-cyan-400/40 bg-cyan-400/5 px-4 py-3 text-sm font-medium text-cyan-700 transition hover:-translate-y-0.5 hover:bg-cyan-400/10 dark:text-cyan-300">
+      ${esc(liveLabel || "Open live in SigNoz")} — opens SigNoz (login required) ↗
+    </a>`, { wide: true });
+  const el = document.getElementById("signoz-proof-img");
+  if (el) el.addEventListener("error", () => {
+    el.outerHTML = `<div class="p-8 text-center text-sm text-zinc-400">Screenshot not added yet — save it to <code class="mono">docs/${esc(img)}</code>, then commit &amp; push. The live link below still works (login required).</div>`;
+  });
+}
+
+// One delegated listener survives every innerHTML re-render. Any <a data-signoz-proof> opens the
+// proof modal instead of navigating; its href is read as the live deep-link, so if JS ever fails
+// the anchor still degrades to the real (login-walled) SigNoz link.
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-signoz-proof]");
+  if (!t) return;
+  e.preventDefault();
+  openSigNozModal({
+    title: t.dataset.signozTitle || "SigNoz",
+    img: t.dataset.signozImg || SIGNOZ_TRACE_SHOT,
+    caption: t.dataset.signozCaption || "",
+    liveHref: t.getAttribute("href") || "#",
+    liveLabel: t.dataset.signozLabel || "Open live in SigNoz",
+  });
+});
 
 // --- router -------------------------------------------------------------------------------
 const PROTECTED = ["#/dashboard", "#/autopsy", "#/prognose", "#/leaderboard", "#/risk-gate", "#/autoheal", "#/integrate", "#/onboarding", "#/settings"];
@@ -478,7 +525,7 @@ async function renderDashboard() {
         <p class="mono mt-1 text-xs text-zinc-400">org · ${esc(data.org_id)}</p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <a href="${BLAST_RADIUS_DASHBOARD}" target="_blank" rel="noopener" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Blast Radius in SigNoz ↗</a>
+        <a href="${BLAST_RADIUS_DASHBOARD}" data-signoz-proof data-signoz-img="${SIGNOZ_DASHBOARD_SHOT}" data-signoz-title="Blast radius — the crash across the fleet" data-signoz-label="Open this dashboard in SigNoz" data-signoz-caption="The live SigNoz dashboard for this org: every service and span the crash touched. Captured here so you can see it without a SigNoz login." class="cursor-pointer rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Blast Radius in SigNoz 🔍</a>
         <a href="#/prognose" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Prognosis →</a>
         <a href="#/leaderboard" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Leaderboard →</a>
         <a href="#/risk-gate" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Risk Gate →</a>
@@ -616,8 +663,8 @@ function openIncident(incidentId) {
     </div>
 
     ${traceLink ? `
-      <a href="${traceLink}" target="_blank" rel="noopener" class="mono mt-4 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5">
-        View this trace in SigNoz →
+      <a href="${traceLink}" data-signoz-proof data-signoz-img="${SIGNOZ_TRACE_SHOT}" data-signoz-title="The crash trace, linked to the AI decision span" data-signoz-label="Open this trace in SigNoz" data-signoz-caption="The real SigNoz trace for this incident — the crash span links across the build/run boundary to the span of the AI decision that authored the line. Captured so you can see it without a SigNoz login." class="mono mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5">
+        View this trace in SigNoz 🔍
       </a>
       <p class="mt-2 text-center text-[11px] text-zinc-400">crosses the build/run boundary: crash trace → the AI's decision span</p>
     ` : `<p class="mono mt-4 text-center text-[11px] text-zinc-400">no crash trace id on this incident — resolve was called without live trace context</p>`}
@@ -759,7 +806,7 @@ async function renderAutopsy() {
               </div>
               <p class="mono mt-3 text-[11px] text-zinc-400">${esc(resp.record.decision_id)}</p>
             </div>
-            <a href="${traceLink}" target="_blank" rel="noopener" class="mono mt-4 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5">View this trace in SigNoz →</a>
+            <a href="${traceLink}" data-signoz-proof data-signoz-img="${SIGNOZ_TRACE_SHOT}" data-signoz-title="The crash trace, linked to the AI decision span" data-signoz-label="Open this trace in SigNoz" data-signoz-caption="The real SigNoz trace for this crash — the crash span links across the build/run boundary to the span of the AI decision that authored the line. Captured so you can see it without a SigNoz login." class="mono mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-3 text-sm font-medium text-white transition hover:-translate-y-0.5">View this trace in SigNoz 🔍</a>
           ` : `<p class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">${esc(resp.detail || "The crashing line didn't fall within any indexed decision.")}</p>`}
           <a href="#/dashboard" class="mono mt-4 inline-block text-sm text-cyan-600 dark:text-cyan-400">See it on your dashboard →</a>
         </div>`;
