@@ -18,6 +18,7 @@ from rich.table import Table
 
 from codeautopsy.config import get_settings
 from codeautopsy.fixbot.core import FixBotError, run_fixbot
+from codeautopsy.fixbot.models import FixBotResult
 from codeautopsy.otel import force_utf8_stdout
 from codeautopsy.prognosis.core import PrognosisError, post_comment, render_markdown, scan
 from codeautopsy.provenance.models import ProvenanceRecord
@@ -92,17 +93,30 @@ def fix(
     push: bool = typer.Option(
         False, "--push", help="Push the fix branch and open a PR via `gh` (needs a remote)."
     ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit the result as one JSON line (for the Auto-Heal workflow)."
+    ),
 ) -> None:
     """Feed the agent its own autopsy: patch the bug, prove it with a regression test, commit."""
     settings = get_settings()
-    console.print(
-        "[bold]Fix Bot:[/bold] resolving genealogy and asking the agent to patch itself..."
-    )
+    if not as_json:
+        console.print(
+            "[bold]Fix Bot:[/bold] resolving genealogy and asking the agent to patch itself..."
+        )
     try:
         result = run_fixbot(settings, commit, file, line, push=push)
     except FixBotError as exc:
+        if as_json:
+            # Machine-readable failure so the workflow can still report back cleanly.
+            print(FixBotResult(verified=False, detail=str(exc)).model_dump_json())
+            raise typer.Exit(code=2) from exc
         console.print(f"[red]Fix Bot failed:[/red] {exc}")
         raise typer.Exit(code=2) from exc
+
+    if as_json:
+        # One JSON line on stdout — the workflow parses this to get pr_url/status.
+        print(result.model_dump_json())
+        raise typer.Exit(code=0 if result.verified else 1)
 
     if not result.verified:
         console.print(Panel.fit(

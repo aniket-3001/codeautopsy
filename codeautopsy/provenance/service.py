@@ -6,9 +6,10 @@ decision that authored that line, which it then attaches to the autopsy span as 
 
 from __future__ import annotations
 
+from hmac import compare_digest
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from codeautopsy.accounts.auth import make_require_api_key, make_require_user
@@ -22,6 +23,18 @@ from codeautopsy.accounts.models import (
 )
 from codeautopsy.accounts.security import create_session_token
 from codeautopsy.accounts.store import AccountStore, AccountStoreProtocol, EmailAlreadyRegistered
+from codeautopsy.autoheal.core import (
+    complete_heal_run,
+    create_heal_run,
+    list_heal_runs,
+)
+from codeautopsy.autoheal.models import (
+    HealCompleteRequest,
+    HealRun,
+    HealRunList,
+    HealTriggerRequest,
+    HealWebhookRequest,
+)
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.provenance.indexer import resolve as resolve_provenance
 from codeautopsy.provenance.models import (
@@ -213,6 +226,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def v1_risk_gate(req: RiskGateRequest, ctx=Depends(require_user)) -> RiskGateResponse:
         # Prognosis without a git repo: score a pasted snippet against this org's history.
         return score_snippet(store, req.code, req.reasoning, org_id=ctx.org_id)
+
+    # --- Auto-Heal loop: crash signal -> Fix Bot -> PR, live on the dashboard ----------------
+
+    def _require_heal_secret(x_heal_secret: str = Header(default="")) -> None:
+        """Shared-secret guard for the machine-to-machine heal endpoints (SigNoz webhook and
+        the Fix Bot's report-back). Constant-time compare against the configured secret."""
+        if not compare_digest(x_heal_secret, settings.heal_webhook_secret):
+            raise HTTPException(status_code=401, detail="invalid heal secret")
+
+    @app.post("/v1/heal/trigger", response_model=HealRun)
+    def v1_heal_trigger(req: HealTriggerRequest, ctx=Depends(require_user)) -> HealRun:
+        # The dashboard button: a signed-in judge fires a heal run in their own org. Defaults
+        # to the sample app's seeded bug, so one click starts the whole loop.
+        return create_heal_run(
+            store,
+            org_id=ctx.org_id,
+            commit_sha=req.commit_sha,
+            file_path=req.file_path,
+            line=req.line,
+            trigger="manual",
+            incident_id=req.incident_id,
+            settings=settings,
+        )
+
+    @app.post("/v1/heal/webhook", response_model=HealRun)
+    def v1_heal_webhook(
+        req: HealWebhookRequest, _: None = Depends(_require_heal_secret)
+    ) -> HealRun:
+        # The real automated path: a SigNoz alert on codeautopsy.crashes fires this webhook
+        # when the sample app crashes for real. Shared-secret authed (no user session).
+        return create_heal_run(
+            store,
+            org_id=req.org_id,
+            commit_sha=req.commit_sha,
+            file_path=req.file_path,
+            line=req.line,
+            trigger="signoz-alert",
+            settings=settings,
+        )
+
+    @app.get("/v1/heal/runs", response_model=HealRunList)
+    def v1_heal_runs(ctx=Depends(require_user)) -> HealRunList:
+        # What the #/autoheal page polls: this org's runs, newest first, with live timelines.
+        return list_heal_runs(store, org_id=ctx.org_id)
+
+    @app.post("/v1/heal/{run_id}/complete", response_model=HealRun)
+    def v1_heal_complete(
+        run_id: str, req: HealCompleteRequest, _: None = Depends(_require_heal_secret)
+    ) -> HealRun:
+        # The Fix Bot reporting back from GitHub Actions with the opened PR. Shared-secret authed.
+        run = complete_heal_run(store, run_id, req, org_id=req.org_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="heal run not found")
+        return run
 
     @app.delete("/v1/provenance/{decision_id}")
     def v1_delete(decision_id: str, ctx=Depends(require_user)) -> dict:

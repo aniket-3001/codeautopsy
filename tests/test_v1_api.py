@@ -402,6 +402,104 @@ def test_risk_gate_clear_snippet(tmp_path: Path):
     assert r.json()["verdict"] == "clear"
 
 
+# --- Auto-Heal loop ---------------------------------------------------------------------
+
+_HEAL_SECRET = "test-heal-secret-32-bytes-xxxxxxxxxxxx"
+
+
+def _heal_client(tmp_path: Path) -> TestClient:
+    settings = Settings(
+        CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"),
+        CODEAUTOPSY_ACCOUNTS_DB=str(tmp_path / "accounts.db"),
+        DATABASE_URL=None,
+        JWT_SECRET="test-secret-at-least-32-bytes-long-for-hs256",
+        HEAL_WEBHOOK_SECRET=_HEAL_SECRET,
+    )
+    return TestClient(create_app(settings))
+
+
+def test_heal_trigger_creates_a_run_in_the_callers_org(tmp_path: Path):
+    client = _heal_client(tmp_path)
+    token = _signup(client, "dev@example.com")["access_token"]
+    r = client.post("/v1/heal/trigger", json={}, headers=_auth_headers(token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # No token configured in tests -> dispatch is a graceful no-op, run still recorded.
+    assert body["status"] == "dispatch_failed"
+    assert body["trigger"] == "manual"
+    assert body["file_path"].endswith("sample_app/main.py")
+    assert body["events"]
+
+
+def test_heal_trigger_requires_auth(tmp_path: Path):
+    client = _heal_client(tmp_path)
+    assert client.post("/v1/heal/trigger", json={}).status_code == 401
+
+
+def test_heal_runs_are_org_scoped(tmp_path: Path):
+    client = _heal_client(tmp_path)
+    tok_a = _signup(client, "a@example.com")["access_token"]
+    tok_b = _signup(client, "b@example.com")["access_token"]
+    client.post("/v1/heal/trigger", json={}, headers=_auth_headers(tok_a))
+
+    runs_a = client.get("/v1/heal/runs", headers=_auth_headers(tok_a)).json()["runs"]
+    runs_b = client.get("/v1/heal/runs", headers=_auth_headers(tok_b)).json()["runs"]
+    assert len(runs_a) == 1
+    assert runs_b == []
+
+
+def test_heal_webhook_requires_the_shared_secret(tmp_path: Path):
+    client = _heal_client(tmp_path)
+    # Wrong secret is rejected.
+    bad = client.post(
+        "/v1/heal/webhook", json={"org_id": "demo-public"}, headers={"X-Heal-Secret": "nope"}
+    )
+    assert bad.status_code == 401
+    # Correct secret creates a signoz-alert run.
+    ok = client.post(
+        "/v1/heal/webhook",
+        json={"org_id": "demo-public", "alert": "crash storm"},
+        headers={"X-Heal-Secret": _HEAL_SECRET},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["trigger"] == "signoz-alert"
+
+
+def test_heal_complete_reports_the_pr_back(tmp_path: Path):
+    client = _heal_client(tmp_path)
+    token = _signup(client, "dev@example.com")["access_token"]
+    run = client.post("/v1/heal/trigger", json={}, headers=_auth_headers(token)).json()
+
+    # Fix Bot reports back (shared-secret authed) with the opened PR.
+    r = client.post(
+        f"/v1/heal/{run['run_id']}/complete",
+        json={
+            "org_id": run["org_id"],
+            "status": "succeeded",
+            "pr_url": "https://github.com/x/y/pull/9",
+            "explanation": "validated the discount code",
+        },
+        headers={"X-Heal-Secret": _HEAL_SECRET},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "succeeded"
+    assert r.json()["pr_url"] == "https://github.com/x/y/pull/9"
+
+    # And it now shows on the org's runs feed.
+    runs = client.get("/v1/heal/runs", headers=_auth_headers(token)).json()["runs"]
+    assert runs[0]["status"] == "succeeded"
+
+
+def test_heal_complete_unknown_run_is_404(tmp_path: Path):
+    client = _heal_client(tmp_path)
+    r = client.post(
+        "/v1/heal/heal_missing/complete",
+        json={"org_id": "demo-public", "status": "succeeded"},
+        headers={"X-Heal-Secret": _HEAL_SECRET},
+    )
+    assert r.status_code == 404
+
+
 def test_legacy_public_endpoints_still_work_unauthenticated(tmp_path: Path):
     """The scripted sandbox demo (docs/demo.html) has no auth and must be unaffected."""
     client = _client(tmp_path)
