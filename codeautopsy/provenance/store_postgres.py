@@ -11,7 +11,7 @@ import json
 import psycopg
 
 from codeautopsy.autoheal.models import HealRun
-from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord
+from codeautopsy.provenance.models import IncidentRecord, LessonRecord, ProvenanceRecord
 
 _COLUMNS = (
     "org_id, commit_sha, file_path, line_start, line_end, decision_span_id, decision_trace_id, "
@@ -69,7 +69,27 @@ CREATE TABLE IF NOT EXISTS heal_runs (
     PRIMARY KEY (org_id, run_id)
 );
 CREATE INDEX IF NOT EXISTS idx_heal_org ON heal_runs(org_id, created_at);
+
+CREATE TABLE IF NOT EXISTS lessons (
+    org_id         TEXT NOT NULL DEFAULT 'demo-public',
+    fingerprint    TEXT NOT NULL,
+    lesson         TEXT NOT NULL,
+    decision_id    TEXT NOT NULL DEFAULT '',
+    file_path      TEXT NOT NULL DEFAULT '',
+    cause_of_death TEXT NOT NULL DEFAULT '',
+    patch_summary  TEXT NOT NULL DEFAULT '',
+    times_seen     INTEGER NOT NULL DEFAULT 1,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    PRIMARY KEY (org_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_lessons_org ON lessons(org_id, times_seen);
 """
+
+_LESSON_COLUMNS = (
+    "org_id, fingerprint, lesson, decision_id, file_path, cause_of_death, "
+    "patch_summary, times_seen, created_at, updated_at"
+)
 
 
 class PostgresProvenanceStore:
@@ -258,3 +278,63 @@ class PostgresProvenanceStore:
             )
             rows = cur.fetchall()
         return [HealRun.model_validate_json(r[0]) for r in rows]
+
+    def record_lesson(self, lesson: LessonRecord) -> None:
+        with psycopg.connect(self.dsn) as conn:
+            conn.execute(
+                f"""
+                INSERT INTO lessons ({_LESSON_COLUMNS})
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (org_id, fingerprint) DO UPDATE SET
+                    lesson = EXCLUDED.lesson,
+                    decision_id = EXCLUDED.decision_id,
+                    patch_summary = EXCLUDED.patch_summary,
+                    times_seen = lessons.times_seen + 1,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    lesson.org_id,
+                    lesson.fingerprint,
+                    lesson.lesson,
+                    lesson.decision_id,
+                    lesson.file_path,
+                    lesson.cause_of_death,
+                    lesson.patch_summary,
+                    lesson.times_seen,
+                    lesson.created_at,
+                    lesson.updated_at,
+                ),
+            )
+
+    def find_lesson(self, org_id: str, fingerprint: str) -> LessonRecord | None:
+        with psycopg.connect(self.dsn) as conn:
+            row = conn.execute(
+                f"SELECT {_LESSON_COLUMNS} FROM lessons WHERE org_id = %s AND fingerprint = %s",
+                (org_id, fingerprint),
+            ).fetchone()
+        return self._lesson_from_row(row) if row else None
+
+    def list_lessons(self, org_id: str = "demo-public") -> list[LessonRecord]:
+        with psycopg.connect(self.dsn) as conn:
+            cur = conn.execute(
+                f"SELECT {_LESSON_COLUMNS} FROM lessons WHERE org_id = %s "
+                "ORDER BY times_seen DESC, updated_at DESC",
+                (org_id,),
+            )
+            rows = cur.fetchall()
+        return [self._lesson_from_row(r) for r in rows]
+
+    @staticmethod
+    def _lesson_from_row(row: tuple) -> LessonRecord:
+        return LessonRecord(
+            org_id=row[0],
+            fingerprint=row[1],
+            lesson=row[2],
+            decision_id=row[3],
+            file_path=row[4],
+            cause_of_death=row[5],
+            patch_summary=row[6],
+            times_seen=row[7],
+            created_at=row[8],
+            updated_at=row[9],
+        )

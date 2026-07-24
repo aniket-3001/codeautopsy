@@ -127,6 +127,70 @@ def provenance(
 
 
 @app.command()
+def lessons(
+    org_id: str = typer.Option("demo-public", "--org", help="Org whose lessons to list."),
+) -> None:
+    """List the lessons the Fix Bot has learned — its memory of past bugs and their fixes."""
+    from codeautopsy.provenance.store import make_store
+
+    store = make_store(get_settings())
+    learned = store.list_lessons(org_id)
+    if not learned:
+        console.print("[yellow]No lessons learned yet.[/yellow] Run `codeautopsy fix` on a crash.")
+        return
+
+    table = Table(title="Fix Bot — lessons memory")
+    table.add_column("seen", justify="right", style="cyan")
+    table.add_column("cause of death")
+    table.add_column("lesson")
+    for lesson_rec in learned:
+        table.add_row(str(lesson_rec.times_seen), lesson_rec.cause_of_death, lesson_rec.lesson)
+    console.print(table)
+
+
+@app.command()
+def recall(
+    commit: str = typer.Argument(..., help="Deployed commit SHA of the crash."),
+    file: str = typer.Argument(..., help="Repo-relative file path of the crashing line."),
+    line: int = typer.Argument(..., help="Crashing line number."),
+    org_id: str = typer.Option("demo-public", "--org", help="Org whose memory to search."),
+) -> None:
+    """Instantly replay a known lesson for a crash — a pure store read, no LLM call.
+
+    If this class of bug has been fixed before, print the lesson the Fix Bot recorded then,
+    without invoking the model at all. This is the fast path `codeautopsy fix` takes internally.
+    """
+    from codeautopsy.fixbot.core import build_genealogy
+    from codeautopsy.fixbot.lessons import recall_lesson
+    from codeautopsy.provenance.store import make_store
+
+    settings = get_settings()
+    genealogy = build_genealogy(settings, commit, file, line)
+    hit = recall_lesson(
+        make_store(settings),
+        cause_of_death=genealogy.cause_of_death,
+        file_path=file,
+        risk_flags=genealogy.risk_flags,
+        org_id=org_id,
+    )
+    if hit is None:
+        console.print(
+            "[yellow]No lesson in memory for this class of bug.[/yellow] "
+            "Run `codeautopsy fix` to learn one."
+        )
+        raise typer.Exit(code=1)
+
+    body = (
+        f"[bold]\"{hit.lesson}\"[/bold]\n\n"
+        f"seen:       {hit.times_seen}x\n"
+        f"cause:      {hit.cause_of_death}\n"
+        f"last fix:   {hit.patch_summary}\n"
+        f"(replayed from memory — no LLM call)"
+    )
+    console.print(Panel.fit(body, title="Lesson recalled", border_style="green"))
+
+
+@app.command()
 def fix(
     commit: str = typer.Argument(..., help="The deployed commit SHA."),
     file: str = typer.Argument(..., help="File path, repo-relative."),
@@ -166,8 +230,15 @@ def fix(
         ))
         raise typer.Exit(code=1)
 
+    replay = ""
+    if result.prior_lesson:
+        replay = (
+            f"[cyan]recalled from memory[/cyan] (seen {result.times_seen}x): "
+            f"\"{result.prior_lesson}\"\n"
+        )
     body = (
         f"[bold]{result.explanation}[/bold]\n\n"
+        f"{replay}"
         f"lesson:     {result.lesson}\n"
         f"branch:     {result.branch}\n"
         f"commit:     {result.commit_sha[:12] if result.commit_sha else '-'}\n"

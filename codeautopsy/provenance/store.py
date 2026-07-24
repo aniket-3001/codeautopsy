@@ -11,10 +11,13 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from codeautopsy.autoheal.models import HealRun
-from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord
+from codeautopsy.provenance.models import IncidentRecord, LessonRecord, ProvenanceRecord
+
+if TYPE_CHECKING:
+    from codeautopsy.config import Settings
 
 
 class ProvenanceStoreProtocol(Protocol):
@@ -33,6 +36,9 @@ class ProvenanceStoreProtocol(Protocol):
     def save_heal_run(self, run: HealRun) -> None: ...
     def get_heal_run(self, run_id: str, org_id: str = "demo-public") -> HealRun | None: ...
     def list_heal_runs(self, org_id: str = "demo-public") -> list[HealRun]: ...
+    def record_lesson(self, lesson: LessonRecord) -> None: ...
+    def find_lesson(self, org_id: str, fingerprint: str) -> LessonRecord | None: ...
+    def list_lessons(self, org_id: str = "demo-public") -> list[LessonRecord]: ...
 
 
 _SCHEMA = """
@@ -81,6 +87,21 @@ CREATE TABLE IF NOT EXISTS heal_runs (
     PRIMARY KEY (org_id, run_id)
 );
 CREATE INDEX IF NOT EXISTS idx_heal_org ON heal_runs(org_id, created_at);
+
+CREATE TABLE IF NOT EXISTS lessons (
+    org_id TEXT NOT NULL DEFAULT 'demo-public',
+    fingerprint TEXT NOT NULL,
+    lesson TEXT NOT NULL,
+    decision_id TEXT NOT NULL DEFAULT '',
+    file_path TEXT NOT NULL DEFAULT '',
+    cause_of_death TEXT NOT NULL DEFAULT '',
+    patch_summary TEXT NOT NULL DEFAULT '',
+    times_seen INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_lessons_org ON lessons(org_id, times_seen);
 """
 
 
@@ -282,3 +303,67 @@ class ProvenanceStore:
                 "SELECT data FROM heal_runs WHERE org_id = ? ORDER BY created_at", (org_id,)
             ).fetchall()
         return [HealRun.model_validate_json(r["data"]) for r in rows]
+
+    # --- lessons memory -------------------------------------------------------------
+    _LESSON_COLS = (
+        "org_id, fingerprint, lesson, decision_id, file_path, cause_of_death, "
+        "patch_summary, times_seen, created_at, updated_at"
+    )
+
+    def record_lesson(self, lesson: LessonRecord) -> None:
+        """Upsert: a recurrence of this bug class bumps times_seen rather than duplicating."""
+        with self._conn() as conn:
+            conn.execute(
+                f"""
+                INSERT INTO lessons ({self._LESSON_COLS})
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(org_id, fingerprint) DO UPDATE SET
+                    lesson = excluded.lesson,
+                    decision_id = excluded.decision_id,
+                    patch_summary = excluded.patch_summary,
+                    times_seen = lessons.times_seen + 1,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    lesson.org_id,
+                    lesson.fingerprint,
+                    lesson.lesson,
+                    lesson.decision_id,
+                    lesson.file_path,
+                    lesson.cause_of_death,
+                    lesson.patch_summary,
+                    lesson.times_seen,
+                    lesson.created_at,
+                    lesson.updated_at,
+                ),
+            )
+
+    def find_lesson(self, org_id: str, fingerprint: str) -> LessonRecord | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                f"SELECT {self._LESSON_COLS} FROM lessons WHERE org_id = ? AND fingerprint = ?",
+                (org_id, fingerprint),
+            ).fetchone()
+        return LessonRecord(**dict(row)) if row else None
+
+    def list_lessons(self, org_id: str = "demo-public") -> list[LessonRecord]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT {self._LESSON_COLS} FROM lessons WHERE org_id = ? "
+                "ORDER BY times_seen DESC, updated_at DESC",
+                (org_id,),
+            ).fetchall()
+        return [LessonRecord(**dict(r)) for r in rows]
+
+
+def make_store(settings: Settings) -> ProvenanceStoreProtocol:
+    """The canonical store selector: Postgres when DATABASE_URL is set, else on-disk SQLite.
+
+    Shared by every local-first entry point (CLI, Fix Bot, MCP server) so they all read and write
+    the same provenance index the same way.
+    """
+    if settings.database_url:
+        from codeautopsy.provenance.store_postgres import PostgresProvenanceStore
+
+        return PostgresProvenanceStore(settings.database_url)
+    return ProvenanceStore(settings.provenance_db)

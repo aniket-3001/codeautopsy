@@ -12,19 +12,8 @@ from pathlib import Path
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.provenance.indexer import resolve as resolve_provenance
 from codeautopsy.provenance.models import ResolveRequest, ResolveResponse
-from codeautopsy.provenance.store import ProvenanceStore, ProvenanceStoreProtocol
+from codeautopsy.provenance.store import ProvenanceStoreProtocol, make_store
 from codeautopsy.reliability.core import compute_leaderboard, score_snippet
-
-
-def make_store(settings: Settings) -> ProvenanceStoreProtocol:
-    """Local-first store, mirroring the provenance service: Postgres when DATABASE_URL is set,
-    else the on-disk SQLite the CLI and recorder already use — so an IDE-side MCP client reads
-    the developer's *own* provenance index without a network hop."""
-    if settings.database_url:
-        from codeautopsy.provenance.store_postgres import PostgresProvenanceStore
-
-        return PostgresProvenanceStore(settings.database_url)
-    return ProvenanceStore(settings.provenance_db)
 
 
 def _autopsy_payload(

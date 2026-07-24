@@ -25,6 +25,9 @@ class Genealogy(BaseModel):
     exc_message: str = ""
     cause_of_death: str = ""
     context: dict = Field(default_factory=dict)
+    # A lesson recalled from memory for this *class* of bug (a pure store read, no LLM). When
+    # set, it is fed back into the agent's own prompt so it doesn't re-learn from scratch.
+    prior_lesson: str = ""
 
 
 class FixProposal(BaseModel):
@@ -47,3 +50,8 @@ class FixBotResult(BaseModel):
     commit_sha: str | None = None
     pr_url: str | None = None
     detail: str = ""
+    # Lessons memory: the lesson recalled for this class of bug (if this bug has struck before),
+    # and how many times it has now been seen. `prior_lesson` being set is the "we've seen this
+    # before" signal — it was fed into the fix without a fresh round of learning.
+    prior_lesson: str = ""
+    times_seen: int = 0

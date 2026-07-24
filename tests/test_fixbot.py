@@ -81,7 +81,9 @@ def _settings_for(repo: Path) -> Settings:
     return Settings(
         GROQ_API_KEY="test-key",
         CODEAUTOPSY_TARGET_REPO=str(repo),
-        CODEAUTOPSY_PROVENANCE_DB=str(repo / "provenance.db"),
+        # The provenance index (and lessons memory) lives *outside* the target repo, as in
+        # production — so writing to it never dirties the repo working tree.
+        CODEAUTOPSY_PROVENANCE_DB=str(repo.parent / "provenance.db"),
     )
 
 

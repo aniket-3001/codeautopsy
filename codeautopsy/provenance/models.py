@@ -42,6 +42,26 @@ class ProvenanceRecord(BaseModel):
         return self.line_start <= line <= self.line_end
 
 
+class LessonRecord(BaseModel):
+    """One lesson the Fix Bot learned from a verified fix, keyed by (org_id, fingerprint).
+
+    Lives here (not in fixbot/) so the store can persist it without the store depending on the
+    fixbot package. `times_seen` counts how often this class of bug has recurred. The fingerprint
+    logic and record/recall helpers live in `codeautopsy.fixbot.lessons`.
+    """
+
+    org_id: str = "demo-public"
+    fingerprint: str
+    lesson: str
+    decision_id: str = ""
+    file_path: str = ""
+    cause_of_death: str = ""
+    patch_summary: str = ""
+    times_seen: int = 1
+    created_at: str = Field(default_factory=_now)
+    updated_at: str = Field(default_factory=_now)
+
+
 class ResolveRequest(BaseModel):
     """Ask: which AI decision authored this file:line as of this deployed commit?"""
 

@@ -24,7 +24,9 @@ from pathlib import Path
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.enricher.core import resolve_decision
 from codeautopsy.enricher.incidents import latest_incident_for
+from codeautopsy.fixbot.lessons import recall_lesson, record_lesson
 from codeautopsy.fixbot.models import FixBotResult, FixProposal, Genealogy
+from codeautopsy.provenance.store import make_store
 from codeautopsy.provenance.trailers import format_trailers
 
 
@@ -83,6 +85,10 @@ That code just crashed in production:
   {genealogy.exc_type}: {genealogy.exc_message}
   cause of death: {genealogy.cause_of_death}
   triggering input: {genealogy.context}
+{f'''
+You have fixed this CLASS of bug before. The lesson you recorded then:
+  "{genealogy.prior_lesson}"
+Apply it — do not re-derive it from scratch.''' if genealogy.prior_lesson else ''}
 
 Current full content of {genealogy.file_path}:
 --- BEGIN FILE ---
@@ -347,6 +353,19 @@ def run_fixbot(
         )
 
     genealogy = build_genealogy(settings, commit_sha, file_path, line)
+
+    # Lessons memory: has this *class* of bug struck before? A pure store read (no LLM). If so,
+    # feed the lesson we recorded then back into the agent's prompt so it doesn't re-learn it.
+    store = make_store(settings)
+    prior = recall_lesson(
+        store,
+        cause_of_death=genealogy.cause_of_death,
+        file_path=file_path,
+        risk_flags=genealogy.risk_flags,
+    )
+    if prior:
+        genealogy.prior_lesson = prior.lesson
+
     proposal = propose_fix(genealogy, settings)
 
     decision_tag = genealogy.decision_id or "unknown"
@@ -397,6 +416,18 @@ def run_fixbot(
             body=message,
         )
 
+    # The fix verified — commit the lesson to memory so the next recurrence can replay it.
+    recorded = record_lesson(
+        store,
+        lesson=proposal.lesson,
+        cause_of_death=genealogy.cause_of_death,
+        file_path=file_path,
+        risk_flags=genealogy.risk_flags,
+        decision_id=genealogy.decision_id,
+        patch_summary=proposal.explanation,
+    )
+    stored = store.find_lesson(recorded.org_id, recorded.fingerprint)
+
     return FixBotResult(
         verified=True,
         explanation=proposal.explanation,
@@ -406,4 +437,6 @@ def run_fixbot(
         commit_sha=commit_sha_new,
         pr_url=pr_url,
         detail="fix verified by regression test and committed",
+        prior_lesson=prior.lesson if prior else "",
+        times_seen=stored.times_seen if stored else 1,
     )
