@@ -15,6 +15,12 @@ Built for the **WeMakeDevs × SigNoz** hackathon (Track 3 · Agents of SigNoz).
 [sample app](https://codeautopsy-sample-app-182653908302.us-central1.run.app/health) ·
 [provenance API](https://codeautopsy-provenance-182653908302.us-central1.run.app/health)
 
+> **Judges — SigNoz proof without a login:** the web app shows captured screenshots of the real
+> trace + blast-radius dashboard in-app (SigNoz Cloud has no anonymous sharing). Want *live*
+> access to the SigNoz workspace? Email
+> [angadjeetsingh7370@gmail.com](mailto:angadjeetsingh7370@gmail.com?subject=CodeAutopsy%20%E2%80%94%20SigNoz%20viewer%20access)
+> and I'll add you as a read-only viewer.
+
 ---
 
 ## The one trick
