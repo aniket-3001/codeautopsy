@@ -198,11 +198,16 @@ function openModal(html) {
 function closeModal() { document.getElementById("modal-root").innerHTML = ""; }
 
 // --- router -------------------------------------------------------------------------------
-const PROTECTED = ["#/dashboard", "#/autopsy", "#/prognose", "#/leaderboard", "#/risk-gate", "#/integrate", "#/onboarding", "#/settings"];
+const PROTECTED = ["#/dashboard", "#/autopsy", "#/prognose", "#/leaderboard", "#/risk-gate", "#/autoheal", "#/integrate", "#/onboarding", "#/settings"];
 
 function navigate(hash) { location.hash = hash; }
 
+// Any live poll loop (Auto-Heal timeline) is torn down on every navigation.
+let _healPollTimer = null;
+function stopHealPoll() { if (_healPollTimer) { clearTimeout(_healPollTimer); _healPollTimer = null; } }
+
 async function render() {
+  stopHealPoll();
   let hash = location.hash || "#/";
   if (PROTECTED.includes(hash) && !getToken()) hash = "#/login";
   if ((hash === "#/login" || hash === "#/signup") && getToken()) hash = "#/dashboard";
@@ -222,6 +227,7 @@ async function render() {
     if (hash === "#/prognose") return await renderPrognose();
     if (hash === "#/leaderboard") return await renderLeaderboard();
     if (hash === "#/risk-gate") return await renderRiskGate();
+    if (hash === "#/autoheal") return await renderAutoheal();
     if (hash === "#/integrate") return await renderIntegrate();
     if (hash === "#/settings") return await renderSettings();
     main.innerHTML = '<p class="text-sm text-zinc-500">Not found.</p>';
@@ -239,6 +245,7 @@ function renderNav() {
       <a href="#/prognose" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Prognosis</a>
       <a href="#/leaderboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Leaderboard</a>
       <a href="#/risk-gate" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Risk Gate</a>
+      <a href="#/autoheal" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Auto-Heal</a>
       <a href="#/integrate" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Integrate</a>
       <a href="#/settings" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Settings</a>
       <span class="mono hidden text-xs text-zinc-400 sm:inline">${esc(getEmail())}</span>
@@ -432,6 +439,7 @@ async function renderDashboard() {
         <a href="#/prognose" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Prognosis →</a>
         <a href="#/leaderboard" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Leaderboard →</a>
         <a href="#/risk-gate" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Risk Gate →</a>
+        <a href="#/autoheal" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Auto-Heal →</a>
         <a href="#/autopsy" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-2 text-xs font-medium text-white transition hover:-translate-y-0.5">Run a Live Autopsy →</a>
       </div>
     </div>
@@ -989,6 +997,120 @@ async function renderRiskGate() {
     }
   };
   btn.addEventListener("click", runScore);
+}
+
+// --- Auto-Heal ------------------------------------------------------------------------
+function healStatusBadge(status) {
+  const map = {
+    triggered: ["Triggered", "border-amber-300 bg-amber-400/10 text-amber-600 dark:border-amber-700 dark:text-amber-300"],
+    dispatched: ["Fix Bot running", "border-cyan-300 bg-cyan-400/10 text-cyan-600 dark:border-cyan-700 dark:text-cyan-300"],
+    succeeded: ["Healed — PR open", "border-emerald-300 bg-emerald-400/10 text-emerald-600 dark:border-emerald-700 dark:text-emerald-300"],
+    failed: ["Fix failed", "border-rose-300 bg-rose-400/10 text-rose-600 dark:border-rose-700 dark:text-rose-300"],
+    dispatch_failed: ["Dispatch skipped", "border-zinc-300 bg-zinc-400/10 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"],
+  };
+  const [label, cls] = map[status] || [status, "border-zinc-300 text-zinc-500 dark:border-zinc-700"];
+  const live = (status === "triggered" || status === "dispatched")
+    ? `<span class="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current"></span>` : "";
+  return `<span class="mono inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${cls}">${esc(label)}${live}</span>`;
+}
+
+function healEventsHTML(events) {
+  if (!events || !events.length) return "";
+  return `<ol class="mt-3 space-y-2 border-l border-zinc-200 pl-4 dark:border-zinc-800">
+    ${events.map(e => {
+      let t = "";
+      try { t = new Date(e.ts).toLocaleTimeString(); } catch { t = ""; }
+      return `<li class="relative">
+        <span class="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-600"></span>
+        <p class="text-xs text-zinc-700 dark:text-zinc-200">${esc(e.label)}</p>
+        ${e.detail ? `<p class="mono mt-0.5 text-[11px] text-zinc-400 break-all">${esc(e.detail)}</p>` : ""}
+        <p class="mono text-[10px] text-zinc-400">${esc(t)}</p>
+      </li>`;
+    }).join("")}
+  </ol>`;
+}
+
+function healRunHTML(run) {
+  const prLink = run.pr_url
+    ? `<a href="${esc(run.pr_url)}" target="_blank" rel="noopener" class="mono rounded-lg border border-emerald-400/50 px-3 py-1.5 text-xs font-medium text-emerald-600 transition hover:bg-emerald-400/10 dark:text-emerald-300">View pull request →</a>`
+    : "";
+  return `<div class="card">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <p class="mono text-[11px] uppercase tracking-wider text-zinc-400">${esc(run.trigger)} · ${esc(run.run_id)}</p>
+        <p class="mono mt-1 text-xs text-zinc-500 break-all">${esc(run.file_path)}:${run.line}</p>
+      </div>
+      ${healStatusBadge(run.status)}
+    </div>
+    ${run.explanation ? `<p class="mt-3 text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">${esc(run.explanation)}</p>` : ""}
+    ${run.lesson ? `<p class="mt-2 rounded-lg border border-amber-400/30 bg-amber-400/5 p-2.5 text-xs text-amber-700 dark:text-amber-300"><span class="font-semibold">Lesson learned:</span> ${esc(run.lesson)}</p>` : ""}
+    ${healEventsHTML(run.events)}
+    ${prLink ? `<div class="mt-4">${prLink}</div>` : ""}
+  </div>`;
+}
+
+async function pollHealRuns() {
+  const wrap = document.getElementById("ah-runs");
+  if (!wrap || location.hash !== "#/autoheal") return;
+  try {
+    const data = await api("/v1/heal/runs", { headers: authHeaders() });
+    const runs = data.runs || [];
+    wrap.innerHTML = runs.length
+      ? runs.map(healRunHTML).join("")
+      : `<div class="card"><p class="text-sm text-zinc-400">No heal runs yet. Trigger one above — or crash the sample app and let the SigNoz alert fire this automatically.</p></div>`;
+    // Keep polling while any run is still in flight (or always, cheaply, so real webhook
+    // runs appear too). Re-check we're still on the page each tick.
+    if (document.getElementById("ah-runs") && location.hash === "#/autoheal") {
+      _healPollTimer = setTimeout(pollHealRuns, 3000);
+    }
+  } catch (e) {
+    if (document.getElementById("ah-runs") && location.hash === "#/autoheal") {
+      _healPollTimer = setTimeout(pollHealRuns, 5000);
+    }
+  }
+}
+
+async function renderAutoheal() {
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <h1 class="serif text-3xl">Auto-Heal</h1>
+    <p class="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+      The payoff loop. When the sample app crashes for real, a <span class="text-zinc-700 dark:text-zinc-200">SigNoz alert</span> on the
+      crash metric fires a webhook here — and a first-party <span class="text-zinc-700 dark:text-zinc-200">Fix Bot</span> is handed its own
+      autopsy, patches the seeded bug, proves the fix with a regression test, and opens a pull request. Watch it happen live below.
+    </p>
+
+    <div class="card mt-6 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <p class="text-sm text-zinc-700 dark:text-zinc-200">Trigger a heal run</p>
+        <p class="mono mt-1 text-[11px] text-zinc-400">fires <span class="text-zinc-500">POST /v1/heal/trigger</span> → dispatches the Fix Bot at the seeded bug</p>
+      </div>
+      <button id="ah-trigger" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-5 py-2 text-xs font-medium text-white transition hover:-translate-y-0.5">Trigger Auto-Heal →</button>
+    </div>
+    <p id="ah-status" class="mt-2 text-xs text-zinc-400"></p>
+
+    <div id="ah-runs" class="mt-6 space-y-4"><div class="card"><p class="text-sm text-zinc-400">Loading heal runs…</p></div></div>
+    <a href="#/dashboard" class="mono mt-6 inline-block text-sm text-cyan-600 dark:text-cyan-400">Back to dashboard →</a>
+  `;
+
+  const btn = document.getElementById("ah-trigger");
+  btn.addEventListener("click", async () => {
+    const status = document.getElementById("ah-status");
+    status.textContent = "Triggering…";
+    btn.disabled = true;
+    try {
+      await api("/v1/heal/trigger", { method: "POST", headers: authHeaders(), body: {} });
+      status.textContent = "Heal run started — watch the timeline below.";
+      stopHealPoll();
+      await pollHealRuns();
+    } catch (e) {
+      status.textContent = e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  await pollHealRuns();
 }
 
 async function renderSettings() {
