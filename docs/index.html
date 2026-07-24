@@ -69,7 +69,7 @@
 <main id="main">
 
 <section class="mx-auto max-w-4xl px-5 pt-24 pb-16 text-center">
-  <div class="rise mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400" style="animation-delay:.05s"><span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span><span class="mono">record · resolve · <span class="text-cyan-600 dark:text-cyan-400">fix()</span></span> · built for SigNoz</div>
+  <div class="rise mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400" style="animation-delay:.05s"><span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span><span class="mono">record · resolve · <span class="text-cyan-600 dark:text-cyan-400">fix()</span> · prognose()</span> · built for SigNoz</div>
   <h1 class="rise serif text-5xl leading-[1.05] tracking-tight sm:text-6xl lg:text-[4.75rem]" style="animation-delay:.12s">Observability stops at the deploy.<br><span class="grad italic">CodeAutopsy doesn't.</span></h1>
   <p class="rise mx-auto mt-6 max-w-2xl text-base leading-relaxed text-zinc-500 dark:text-zinc-400" style="animation-delay:.22s"><span class="mono text-zinc-700 dark:text-zinc-300">git blame</span> tells you which commit broke prod. CodeAutopsy tells you which <span class="font-medium text-zinc-900 dark:text-zinc-100">reasoning step of which AI agent</span> broke it — crossing the dev-time → runtime boundary with a single OpenTelemetry span link, then handing the agent its own autopsy so it fixes itself.</p>
   <div class="rise mt-9 flex flex-wrap justify-center gap-3" style="animation-delay:.32s">
@@ -140,7 +140,7 @@
 
 <section id="pipeline" class="mx-auto max-w-5xl px-5 pb-24">
   <h2 class="reveal serif text-center text-4xl italic">The pipeline</h2>
-  <p class="reveal mx-auto mt-3 max-w-xl text-center text-sm text-zinc-500 dark:text-zinc-400">Five small components. None of them are clever alone — the join is the whole product.</p>
+  <p class="reveal mx-auto mt-3 max-w-xl text-center text-sm text-zinc-500 dark:text-zinc-400">Six small components. None of them are clever alone — the join is the whole product.</p>
   <div class="stg mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
     <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:0">
       <div class="font-medium">Recorder</div>
@@ -158,9 +158,13 @@
       <div class="font-medium">Coroner CLI</div>
       <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400"><span class="mono">codeautopsy autopsy &lt;commit&gt; &lt;file&gt; &lt;line&gt;</span> — the chain of custody, printed for a human.</p>
     </div>
-    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60 sm:col-span-2" style="--i:4">
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:4">
       <div class="font-medium">Fix Bot</div>
-      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Feeds the agent its own genealogy — the reasoning that wrote the bug and the incident that proves it broke — as a forced tool call. Applies the patch, proves it with a real regression test derived from the exact failing input, and only commits + opens a PR if that test actually passes.</p>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Feeds the agent its own genealogy — the reasoning that wrote the bug and the incident that proves it broke. Applies the patch, proves it with a real regression test derived from the exact failing input, and only commits + opens a PR if that test actually passes.</p>
+    </div>
+    <div class="rounded-2xl border border-zinc-300 bg-white/60 p-5 backdrop-blur transition dark:border-zinc-800 dark:bg-[#0b1018]/60" style="--i:5">
+      <div class="font-medium">Prognosis</div>
+      <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">The pre-mortem. Runs on every pull request, resolves each added line back to its authoring decision the same way, and prices its risk flags against every crash that flag has caused so far — then comments the priced report straight on the PR, before it merges.</p>
     </div>
   </div>
 </section>

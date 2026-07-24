@@ -54,6 +54,7 @@
 <script>
 const API = "https://codeautopsy-provenance-3bczbiamba-uc.a.run.app";
 const SIGNOZ_CONSOLE = "https://mighty-bonefish.in2.signoz.cloud";
+const BLAST_RADIUS_DASHBOARD = `${SIGNOZ_CONSOLE}/dashboard/019f94fb-637b-794f-a675-62cf18335de0`;
 
 // --- tiny auth-state helpers -------------------------------------------------------------
 function getToken() { return localStorage.getItem("ca_token"); }
@@ -197,7 +198,7 @@ function openModal(html) {
 function closeModal() { document.getElementById("modal-root").innerHTML = ""; }
 
 // --- router -------------------------------------------------------------------------------
-const PROTECTED = ["#/dashboard", "#/autopsy", "#/integrate", "#/onboarding", "#/settings"];
+const PROTECTED = ["#/dashboard", "#/autopsy", "#/prognose", "#/integrate", "#/onboarding", "#/settings"];
 
 function navigate(hash) { location.hash = hash; }
 
@@ -218,6 +219,7 @@ async function render() {
     if (hash === "#/onboarding") return await renderOnboarding();
     if (hash === "#/dashboard") return await renderDashboard();
     if (hash === "#/autopsy") return await renderAutopsy();
+    if (hash === "#/prognose") return await renderPrognose();
     if (hash === "#/integrate") return await renderIntegrate();
     if (hash === "#/settings") return await renderSettings();
     main.innerHTML = '<p class="text-sm text-zinc-500">Not found.</p>';
@@ -232,6 +234,7 @@ function renderNav() {
     nav.innerHTML = `
       <a href="#/dashboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Dashboard</a>
       <a href="#/autopsy" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Live Autopsy</a>
+      <a href="#/prognose" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Prognosis</a>
       <a href="#/integrate" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Integrate</a>
       <a href="#/settings" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Settings</a>
       <span class="mono hidden text-xs text-zinc-400 sm:inline">${esc(getEmail())}</span>
@@ -373,6 +376,17 @@ function decisionById(id) {
   return _dash.decisions.find((d) => d.decision_id && d.decision_id === id) || null;
 }
 
+// Prices a risk flag against every decision + incident indexed so far — the same join
+// codeautopsy.prognosis.core.compute_flag_stats() runs server-side for the CLI/PR bot,
+// computed here client-side against the org's own dashboard data.
+function flagCrashRate(flag) {
+  const withFlag = _dash.decisions.filter((d) => (d.risk_flags || []).includes(flag));
+  if (withFlag.length < 2) return null;
+  const crashedIds = new Set(_dash.incidents.filter((i) => i.decision_id).map((i) => i.decision_id));
+  const crashed = withFlag.filter((d) => d.decision_id && crashedIds.has(d.decision_id)).length;
+  return { rate: crashed / withFlag.length, samples: withFlag.length };
+}
+
 async function renderDashboard() {
   const data = await api("/v1/dashboard", { headers: authHeaders() });
   const decisions = (data.decisions || []).slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
@@ -409,7 +423,11 @@ async function renderDashboard() {
         <h1 class="serif text-3xl">Dashboard</h1>
         <p class="mono mt-1 text-xs text-zinc-400">org · ${esc(data.org_id)}</p>
       </div>
-      <a href="#/autopsy" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-2 text-xs font-medium text-white transition hover:-translate-y-0.5">Run a Live Autopsy →</a>
+      <div class="flex flex-wrap gap-2">
+        <a href="${BLAST_RADIUS_DASHBOARD}" target="_blank" rel="noopener" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Blast Radius in SigNoz ↗</a>
+        <a href="#/prognose" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Prognosis →</a>
+        <a href="#/autopsy" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-2 text-xs font-medium text-white transition hover:-translate-y-0.5">Run a Live Autopsy →</a>
+      </div>
     </div>
 
     <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -529,9 +547,14 @@ function openIncident(incidentId) {
       ${decision ? `
         <p class="mt-2 text-sm">${esc(decision.reasoning_summary || "(no reasoning recorded)")}</p>
         <div class="mt-2 flex flex-wrap gap-1.5">
-          ${(decision.risk_flags || []).map((f) => `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}</span>`).join("")}
+          ${(decision.risk_flags || []).map((f) => {
+            const stat = flagCrashRate(f);
+            const priced = stat ? ` · ${Math.round(stat.rate * 100)}% historical` : "";
+            return `<span class="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300">${esc(f)}${priced}</span>`;
+          }).join("")}
         </div>
         <p class="mono mt-3 text-[11px] text-zinc-400">${esc(decision.decision_id)} · ${esc(decision.model || decision.tool || "")}</p>
+        <a href="#/prognose" class="mono mt-2 inline-block text-[11px] text-cyan-600 dark:text-cyan-400">This is what Prognosis prices on every new PR →</a>
       ` : `<p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">No indexed decision matched this crash — the crashing line predates provenance capture, or wasn't AI-authored.</p>`}
     </div>
 
@@ -687,6 +710,118 @@ async function renderAutopsy() {
       out.innerHTML = `<div class="card border-red-400/40"><p class="text-sm text-red-500">${esc(err.message)}</p></div>`;
     } finally { btn.disabled = false; }
   });
+}
+
+async function renderPrognose() {
+  const data = await api("/v1/dashboard", { headers: authHeaders() });
+  const decisions = data.decisions || [];
+  const incidents = data.incidents || [];
+  const crashedIds = new Set(incidents.filter((i) => i.decision_id).map((i) => i.decision_id));
+
+  const MIN_SAMPLES = 2;
+  const flagStats = {};
+  decisions.forEach((d) => {
+    const crashed = !!(d.decision_id && crashedIds.has(d.decision_id));
+    (d.risk_flags || []).forEach((f) => {
+      const s = flagStats[f] || (flagStats[f] = { decisions: 0, crashed: 0 });
+      s.decisions++;
+      if (crashed) s.crashed++;
+    });
+  });
+  const rows = Object.entries(flagStats).map(([flag, s]) => ({ flag, ...s, rate: s.crashed / s.decisions }));
+  const priced = rows.filter((r) => r.decisions >= MIN_SAMPLES).sort((a, b) => b.rate - a.rate);
+  const unpriced = rows.filter((r) => r.decisions < MIN_SAMPLES);
+
+  const CLI_SNIPPET = "codeautopsy prognose origin/main --comment --fail-on-risk";
+  const YML_SNIPPET = [
+    "on:",
+    "  pull_request:",
+    "    branches: [main]",
+    "",
+    "permissions:",
+    "  contents: read",
+    "  pull-requests: write",
+    "",
+    "jobs:",
+    "  prognose:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+    "        with:",
+    "          fetch-depth: 0",
+    "          ref: ${{ github.event.pull_request.head.sha }}",
+    "",
+    "      - uses: actions/setup-python@v5",
+    "        with:",
+    "          python-version: \"3.11\"",
+    "",
+    "      - run: python -m pip install -e .",
+    "",
+    "      - env:",
+    "          GH_TOKEN: ${{ github.token }}",
+    "        run: |",
+    "          codeautopsy prognose \"${{ github.event.pull_request.base.sha }}\" \\",
+    "            --head \"${{ github.event.pull_request.head.sha }}\" --comment \\",
+    "            --pr \"${{ github.event.pull_request.number }}\"",
+  ].join("\n");
+
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <h1 class="serif text-3xl">Prognosis</h1>
+    <p class="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+      Autopsy explains a crash after it happens. Prognosis prices the risk <span class="text-zinc-700 dark:text-zinc-200">before it merges</span> —
+      it walks a pull request's diff, resolves every added line back to the AI decision that (would) author it via the
+      same git-blame join Autopsy uses, then prices its risk flags against every decision + incident your org has indexed so far.
+    </p>
+
+    <h2 class="serif mt-8 text-xl">Your org's flag crash rates</h2>
+    <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Exactly what a PR comment would price a new line's risk flags against right now, computed live from this dashboard's own data.</p>
+    ${rows.length === 0 ? `
+      <div class="card mt-3 text-center">
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">No risk flags indexed yet — record a decision with <span class="mono">--risk-flag</span>, or run a Live Autopsy, to start pricing.</p>
+      </div>` : `
+      <div class="card mt-3 !p-0 overflow-hidden">
+        <table class="w-full text-left text-sm">
+          <thead class="mono text-[11px] uppercase tracking-wider text-zinc-400">
+            <tr><th class="px-4 py-3">flag</th><th class="px-4 py-3">historical crash rate</th><th class="px-4 py-3">samples</th></tr>
+          </thead>
+          <tbody>
+            ${priced.map((r) => `
+              <tr class="border-t border-zinc-200/80 dark:border-zinc-800/80">
+                <td class="px-4 py-3 mono text-xs">${esc(r.flag)}</td>
+                <td class="px-4 py-3"><span class="font-medium ${r.rate > 0 ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300"}">${Math.round(r.rate * 100)}%</span></td>
+                <td class="px-4 py-3 mono text-xs text-zinc-400">${r.decisions}</td>
+              </tr>`).join("")}
+            ${unpriced.map((r) => `
+              <tr class="border-t border-zinc-200/80 dark:border-zinc-800/80">
+                <td class="px-4 py-3 mono text-xs">${esc(r.flag)}</td>
+                <td class="px-4 py-3 text-xs text-zinc-400">fewer than ${MIN_SAMPLES} decisions — not priced yet</td>
+                <td class="px-4 py-3 mono text-xs text-zinc-400">${r.decisions}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`}
+
+    <h2 class="serif mt-10 text-xl">Wire it into CI</h2>
+    <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Runs on every PR against <span class="mono">main</span>, comments the priced report, and can fail the check on any nonzero-priced flag.</p>
+    <div class="mt-3">
+      <div class="flex items-center justify-end"><button data-copy="snip-prognose-cli" class="mono rounded-lg border border-zinc-300 px-3 py-1 text-[11px] font-medium transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">Copy</button></div>
+      <pre id="snip-prognose-cli" class="mono mt-1.5 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs leading-6 dark:border-zinc-800 dark:bg-black/40"></pre>
+    </div>
+    <div class="mt-4">
+      <div class="flex items-center justify-end"><button data-copy="snip-prognose-yml" class="mono rounded-lg border border-zinc-300 px-3 py-1 text-[11px] font-medium transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">Copy</button></div>
+      <pre id="snip-prognose-yml" class="mono mt-1.5 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs leading-6 dark:border-zinc-800 dark:bg-black/40"></pre>
+    </div>
+
+    <a href="#/dashboard" class="mono mt-6 inline-block text-sm text-cyan-600 dark:text-cyan-400">Back to dashboard →</a>
+  `;
+  document.getElementById("snip-prognose-cli").textContent = CLI_SNIPPET;
+  document.getElementById("snip-prognose-yml").textContent = YML_SNIPPET;
+  main.querySelectorAll("[data-copy]").forEach((btn) =>
+    btn.addEventListener("click", (e) =>
+      copyToClipboard(document.getElementById(btn.dataset.copy).textContent, e.currentTarget)
+    )
+  );
 }
 
 async function renderSettings() {
