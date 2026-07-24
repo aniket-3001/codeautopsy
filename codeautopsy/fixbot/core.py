@@ -25,6 +25,7 @@ from codeautopsy.config import Settings, get_settings
 from codeautopsy.enricher.core import resolve_decision
 from codeautopsy.enricher.incidents import latest_incident_for
 from codeautopsy.fixbot.models import FixBotResult, FixProposal, Genealogy
+from codeautopsy.provenance.trailers import format_trailers
 
 
 class FixBotError(RuntimeError):
@@ -62,6 +63,8 @@ def build_genealogy(
         reasoning_summary=rec.reasoning_summary if rec else "",
         risk_flags=rec.risk_flags if rec else [],
         decision_id=rec.decision_id if rec else "",
+        decision_trace_id=rec.decision_trace_id if rec else "",
+        decision_span_id=rec.decision_span_id if rec else "",
         exc_type=(incident or {}).get("exc_type", ""),
         exc_message=(incident or {}).get("exc_message", ""),
         cause_of_death=(incident or {}).get("cause_of_death", ""),
@@ -373,6 +376,16 @@ def run_fixbot(
         f"Lesson: {proposal.lesson}\n\n"
         f"Closes the loop from `codeautopsy autopsy {commit_sha} {file_path} {line}`."
     )
+    # Stamp the provenance into the commit's trailers, so it lives in git history forever — the
+    # decision this patch descends from, and a traceparent back to that decision's span in SigNoz.
+    trailers = format_trailers(
+        decision_id=genealogy.decision_id,
+        trace_id=genealogy.decision_trace_id,
+        span_id=genealogy.decision_span_id,
+        coordinate=f"{file_path}:{line}@{commit_sha[:12]}",
+    )
+    if trailers:
+        message = f"{message}\n\n{trailers}"
     commit_sha_new = commit_fix(repo_root, branch, message, [file_path, test_file_rel])
 
     pr_url = None

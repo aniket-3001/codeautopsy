@@ -94,6 +94,39 @@ def autopsy(
 
 
 @app.command()
+def provenance(
+    commit: str = typer.Argument(..., help="A commit SHA (or ref) to read provenance from."),
+    repo: str = typer.Option(".", "--repo", help="Path to the git repo (default: current dir)."),
+) -> None:
+    """Recover a commit's AI provenance from its git trailers alone — no store needed.
+
+    Fix Bot stamps every patch commit with the decision it descends from and a traceparent back
+    to that decision's span in SigNoz. This reads those trailers straight out of git history.
+    """
+    from codeautopsy.provenance.trailers import read_commit_trailers
+
+    found = read_commit_trailers(repo, commit)
+    if not found:
+        console.print(
+            f"[yellow]No CodeAutopsy provenance trailers on[/yellow] {commit[:12]} "
+            "(not a Fix Bot commit, or unknown ref)."
+        )
+        raise typer.Exit(code=1)
+
+    lines = [f"decision id:     {found['decision_id']}"] if found.get("decision_id") else []
+    if found.get("coordinate"):
+        lines.append(f"autopsy target:  {found['coordinate']}")
+    if found.get("traceparent"):
+        lines.append(f"traceparent:     {found['traceparent']}")
+    if found.get("trace_id"):
+        lines.append(f"decision trace:  {found['trace_id']}")
+        lines.append(f"decision span:   {found['span_id']}")
+    console.print(
+        Panel.fit("\n".join(lines), title="Provenance from git history", border_style="cyan")
+    )
+
+
+@app.command()
 def fix(
     commit: str = typer.Argument(..., help="The deployed commit SHA."),
     file: str = typer.Argument(..., help="File path, repo-relative."),

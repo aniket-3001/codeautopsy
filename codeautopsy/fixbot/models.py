@@ -17,6 +17,10 @@ class Genealogy(BaseModel):
     reasoning_summary: str = ""
     risk_flags: list[str] = Field(default_factory=list)
     decision_id: str = ""
+    # Ids of the AI *decision* span, so the fix commit's traceparent trailer can point back to
+    # the agent's original reasoning in SigNoz. Empty when the line had no recorded decision.
+    decision_trace_id: str = ""
+    decision_span_id: str = ""
     exc_type: str = ""
     exc_message: str = ""
     cause_of_death: str = ""
