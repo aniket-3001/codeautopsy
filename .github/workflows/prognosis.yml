@@ -1,0 +1,39 @@
+name: Prognosis
+
+# Pre-mortem risk scan: before a PR merges, resolve every added line back to the AI
+# decision that (would) author it via the same git-blame join CodeAutopsy uses to
+# resolve production crashes, then price its risk flags against every decision +
+# incident this repo's own provenance store has indexed so far.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  prognose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — the blame join needs every commit, not just the tip
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install -e .
+
+      - name: Prognosis — scan the diff and comment on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          codeautopsy prognose "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --comment \
+            --pr "${{ github.event.pull_request.number }}"

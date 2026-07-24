@@ -114,6 +114,93 @@ def test_fix_bot_error(monkeypatch):
     assert "Fix Bot failed" in result.stdout
 
 
+def test_prognose_clean_diff(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+    from codeautopsy.prognosis.models import PrognosisReport
+
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli_main,
+        "scan",
+        lambda *a, **kw: PrognosisReport(base_ref="main", head_ref="HEAD", lines_scanned=3),
+    )
+    result = runner.invoke(cli_main.app, ["prognose", "main", "--repo", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Clean bill of health" in result.stdout
+
+
+def test_prognose_reports_priced_findings_and_posts_comment(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+    from codeautopsy.prognosis.models import LineFinding, PrognosisReport
+
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    report = PrognosisReport(
+        base_ref="main",
+        head_ref="HEAD",
+        lines_scanned=1,
+        findings=[
+            LineFinding(
+                file_path="app.py", line=10, risk_flags=["assumed_valid_input"],
+                decision_id="d1", source="decision", crash_rate=0.75,
+                worst_flag="assumed_valid_input", sample_size=4,
+            )
+        ],
+    )
+    monkeypatch.setattr(cli_main, "scan", lambda *a, **kw: report)
+    monkeypatch.setattr(cli_main, "post_comment", lambda *a, **kw: "https://github.com/x/y/pull/1")
+
+    result = runner.invoke(
+        cli_main.app, ["prognose", "main", "--repo", str(tmp_path), "--comment"]
+    )
+    assert result.exit_code == 0
+    assert "app.py:10" in result.stdout
+    assert "Posted to PR" in result.stdout
+
+
+def test_prognose_fail_on_risk_exits_nonzero(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+    from codeautopsy.prognosis.models import LineFinding, PrognosisReport
+
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    report = PrognosisReport(
+        base_ref="main",
+        head_ref="HEAD",
+        lines_scanned=1,
+        findings=[
+            LineFinding(
+                file_path="app.py", line=10, risk_flags=["assumed_valid_input"],
+                source="decision", crash_rate=0.75, worst_flag="assumed_valid_input",
+                sample_size=4,
+            )
+        ],
+    )
+    monkeypatch.setattr(cli_main, "scan", lambda *a, **kw: report)
+
+    result = runner.invoke(
+        cli_main.app, ["prognose", "main", "--repo", str(tmp_path), "--fail-on-risk"]
+    )
+    assert result.exit_code == 1
+
+
+def test_prognose_failure_exits_cleanly(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+    from codeautopsy.prognosis.core import PrognosisError
+
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+
+    def fake_scan(*a, **kw):
+        raise PrognosisError("not a git repository")
+
+    monkeypatch.setattr(cli_main, "scan", fake_scan)
+    result = runner.invoke(cli_main.app, ["prognose", "main", "--repo", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "Prognosis failed" in result.stdout
+
+
 def test_index_commit(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_main, "index_pending_at_head", lambda repo_root, store: 3)
     result = runner.invoke(cli_main.app, ["index-commit", "--repo", str(tmp_path)])

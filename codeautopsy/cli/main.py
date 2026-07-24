@@ -19,6 +19,7 @@ from rich.table import Table
 from codeautopsy.config import get_settings
 from codeautopsy.fixbot.core import FixBotError, run_fixbot
 from codeautopsy.otel import force_utf8_stdout
+from codeautopsy.prognosis.core import PrognosisError, post_comment, render_markdown, scan
 from codeautopsy.provenance.models import ProvenanceRecord
 from codeautopsy.provenance.store import ProvenanceStore
 from codeautopsy.recorder.commit_indexer import index_pending_at_head
@@ -118,6 +119,55 @@ def fix(
         f"pr:         {result.pr_url or '(not pushed — pass --push, or no remote configured)'}"
     )
     console.print(Panel.fit(body, title="Fix Bot — verified & committed", border_style="green"))
+
+
+@app.command()
+def prognose(
+    base: str = typer.Argument(..., help="Base ref to diff against, e.g. origin/master."),
+    head: str = typer.Option("HEAD", "--head", help="Head ref; defaults to the current checkout."),
+    repo: Path = typer.Option(None, "--repo", help="Repo root; defaults to config target_repo."),
+    min_samples: int = typer.Option(
+        2, "--min-samples",
+        help="Minimum historical decisions before trusting a flag's crash rate.",
+    ),
+    comment: bool = typer.Option(
+        False, "--comment", help="Post the report as a PR comment via `gh` (needs a remote)."
+    ),
+    pr: str = typer.Option(
+        None, "--pr", help="PR number/URL to comment on; defaults to the current branch's PR."
+    ),
+    fail_on_risk: bool = typer.Option(
+        False, "--fail-on-risk",
+        help="Exit non-zero if any line prices a nonzero historical crash rate (for CI gating).",
+    ),
+) -> None:
+    """Prognosis Bot: scan a PR's diff for risky AI-authored lines before merge, priced
+    against the crash history every risk flag has already built up in production."""
+    settings = get_settings()
+    repo_root = repo or settings.target_repo
+    store = ProvenanceStore(settings.provenance_db)
+
+    try:
+        report = scan(store, repo_root, base, head, min_samples=min_samples)
+    except PrognosisError as exc:
+        console.print(f"[red]Prognosis failed:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    body = render_markdown(report, min_samples=min_samples)
+    console.print(Panel.fit(body, title="Prognosis report", border_style="magenta"))
+
+    if comment:
+        url = post_comment(repo_root, body, pr=pr)
+        if url:
+            console.print(f"[green]Posted to PR:[/green] {url}")
+        else:
+            console.print(
+                "[yellow]Could not post to PR (no remote, gh not authenticated, "
+                "or no open PR).[/yellow]"
+            )
+
+    if fail_on_risk and any(f.crash_rate for f in report.findings):
+        raise typer.Exit(code=1)
 
 
 @app.command("index-commit")
