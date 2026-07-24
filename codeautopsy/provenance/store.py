@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 
+from codeautopsy.autoheal.models import HealRun
 from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord
 
 
@@ -29,6 +30,9 @@ class ProvenanceStoreProtocol(Protocol):
     def delete(self, decision_id: str, org_id: str | None = None) -> int: ...
     def add_incident(self, incident: IncidentRecord) -> None: ...
     def list_incidents(self, org_id: str = "demo-public") -> list[IncidentRecord]: ...
+    def save_heal_run(self, run: HealRun) -> None: ...
+    def get_heal_run(self, run_id: str, org_id: str = "demo-public") -> HealRun | None: ...
+    def list_heal_runs(self, org_id: str = "demo-public") -> list[HealRun]: ...
 
 
 _SCHEMA = """
@@ -66,6 +70,17 @@ CREATE TABLE IF NOT EXISTS incidents (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, created_at);
+
+CREATE TABLE IF NOT EXISTS heal_runs (
+    org_id TEXT NOT NULL DEFAULT 'demo-public',
+    run_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'triggered',
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_heal_org ON heal_runs(org_id, created_at);
 """
 
 
@@ -228,3 +243,42 @@ class ProvenanceStore:
                 "SELECT * FROM incidents WHERE org_id = ? ORDER BY created_at", (org_id,)
             ).fetchall()
         return [IncidentRecord(**{**dict(r), "resolved": bool(dict(r)["resolved"])}) for r in rows]
+
+    # --- heal runs ------------------------------------------------------------------
+    # The whole run (including its events timeline) is stored as one JSON blob so the model
+    # can grow without a migration; only the columns we query on (org, status, time) are hoisted.
+    def save_heal_run(self, run: HealRun) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO heal_runs (org_id, run_id, status, data, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(org_id, run_id) DO UPDATE SET
+                    status = excluded.status,
+                    data = excluded.data,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    run.org_id,
+                    run.run_id,
+                    run.status,
+                    run.model_dump_json(),
+                    run.created_at,
+                    run.updated_at,
+                ),
+            )
+
+    def get_heal_run(self, run_id: str, org_id: str = "demo-public") -> HealRun | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT data FROM heal_runs WHERE org_id = ? AND run_id = ?",
+                (org_id, run_id),
+            ).fetchone()
+        return HealRun.model_validate_json(row["data"]) if row else None
+
+    def list_heal_runs(self, org_id: str = "demo-public") -> list[HealRun]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT data FROM heal_runs WHERE org_id = ? ORDER BY created_at", (org_id,)
+            ).fetchall()
+        return [HealRun.model_validate_json(r["data"]) for r in rows]

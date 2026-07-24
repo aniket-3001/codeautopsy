@@ -80,6 +80,21 @@ class Settings(BaseSettings):
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
     fixbot_model: str = Field(default="llama-3.3-70b-versatile", alias="CODEAUTOPSY_FIXBOT_MODEL")
 
+    # --- Auto-Heal loop -------------------------------------------------------------
+    # The GitHub repo (owner/name) the Fix Bot patches, and a token allowed to fire a
+    # repository_dispatch there. Both empty in local dev/tests, where dispatch is a no-op.
+    github_repo: str | None = Field(default=None, alias="CODEAUTOPSY_GITHUB_REPO")
+    github_token: str | None = Field(default=None, alias="GITHUB_DISPATCH_TOKEN")
+    # Shared secret guarding the inbound SigNoz webhook and the Fix Bot's report-back.
+    heal_webhook_secret: str = Field(
+        default="dev-only-insecure-heal-secret-change-me", alias="HEAL_WEBHOOK_SECRET"
+    )
+    # This API's own public URL, embedded in the dispatch so the workflow knows where to
+    # report the PR back to.
+    public_base_url: str = Field(
+        default="http://localhost:8100", alias="CODEAUTOPSY_PUBLIC_BASE_URL"
+    )
+
     @property
     def otel_headers(self) -> dict[str, str]:
         """Headers for OTLP export (SigNoz Cloud auth)."""

@@ -10,6 +10,7 @@ import json
 
 import psycopg
 
+from codeautopsy.autoheal.models import HealRun
 from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord
 
 _COLUMNS = (
@@ -57,6 +58,17 @@ CREATE TABLE IF NOT EXISTS incidents (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, created_at);
+
+CREATE TABLE IF NOT EXISTS heal_runs (
+    org_id     TEXT NOT NULL DEFAULT 'demo-public',
+    run_id     TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'triggered',
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_heal_org ON heal_runs(org_id, created_at);
 """
 
 
@@ -207,3 +219,42 @@ class PostgresProvenanceStore:
             columns = [d.name for d in cur.description]
             rows = cur.fetchall()
         return [IncidentRecord(**dict(zip(columns, r, strict=True))) for r in rows]
+
+    # --- heal runs ------------------------------------------------------------------
+    def save_heal_run(self, run: HealRun) -> None:
+        with psycopg.connect(self.dsn) as conn:
+            conn.execute(
+                """
+                INSERT INTO heal_runs (org_id, run_id, status, data, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (org_id, run_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    data = EXCLUDED.data,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    run.org_id,
+                    run.run_id,
+                    run.status,
+                    run.model_dump_json(),
+                    run.created_at,
+                    run.updated_at,
+                ),
+            )
+
+    def get_heal_run(self, run_id: str, org_id: str = "demo-public") -> HealRun | None:
+        with psycopg.connect(self.dsn) as conn:
+            row = conn.execute(
+                "SELECT data FROM heal_runs WHERE org_id = %s AND run_id = %s",
+                (org_id, run_id),
+            ).fetchone()
+        return HealRun.model_validate_json(row[0]) if row else None
+
+    def list_heal_runs(self, org_id: str = "demo-public") -> list[HealRun]:
+        with psycopg.connect(self.dsn) as conn:
+            cur = conn.execute(
+                "SELECT data FROM heal_runs WHERE org_id = %s ORDER BY created_at",
+                (org_id,),
+            )
+            rows = cur.fetchall()
+        return [HealRun.model_validate_json(r[0]) for r in rows]
