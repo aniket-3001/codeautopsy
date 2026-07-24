@@ -1,0 +1,65 @@
+# CodeAutopsy — SigNoz deployment, declared for Foundry (foundryctl).
+#
+# Judges: reproduce the ENTIRE demo locally — a self-hosted SigNoz plus CodeAutopsy's own
+# services — with no dependency on our SigNoz Cloud tenant and no login wall:
+#
+#     curl -fsSL https://signoz.io/foundry.sh | bash    # installs foundryctl
+#     foundryctl cast -f casting.yaml                    # validates, forges, deploys everything
+#
+# This brings up:
+#   * SigNoz            — UI on :8080, OTLP ingest on :4317 (gRPC) / :4318 (HTTP)
+#   * signoz-mcp        — SigNoz's own MCP server on :8000 (see the `mcp` block below)
+#   * provenance        — CodeAutopsy's provenance/resolve API on :8100
+#   * sample-app        — the deliberately-buggy "patient" on :8000-internal
+#
+# Then generate the two linked traces and watch them land in YOUR local SigNoz:
+#
+#     curl -X POST http://localhost:8000/checkout -d '{"discount_code":"AB","subtotal":100}'
+#
+# Note: CodeAutopsy's differentiator is that it *exposes its own* MCP server
+# (`codeautopsy-mcp`, see codeautopsy/mcp/) — it does not depend on SigNoz's MCP. We enable
+# SigNoz's MCP here anyway because it's the hackathon's standard backend and costs nothing.
+apiVersion: v1alpha1
+kind: Installation
+metadata:
+  name: signoz
+  annotations:
+    hackathon: "agents-of-signoz"
+    project: "codeautopsy"
+spec:
+  deployment:
+    mode: docker
+    flavor: compose
+
+  # Deploy SigNoz's MCP server alongside the stack (adds `signoz-mcp` on :8000) so AI clients
+  # that want to query telemetry over MCP can. CodeAutopsy itself does not require it.
+  mcp:
+    spec:
+      enabled: true
+
+  # Single-node ClickHouse + sqlite metastore — a zero-dependency bring-up that is plenty for
+  # the demo, and keeps a judge's laptop happy.
+  telemetrystore:
+    spec:
+      cluster:
+        replicas: 1
+        shards: 1
+  metastore:
+    kind: sqlite
+
+  # Bring CodeAutopsy's own services up in the same deployment, wired to export into the
+  # local SigNoz collector (service `otel-collector` on the shared Foundry network). This is
+  # the whole point: the linked decision + autopsy traces show up in the judge's OWN SigNoz.
+  components:
+    - name: codeautopsy
+      type: compose
+      spec:
+        file: docker-compose.yml
+        project: codeautopsy
+        services:
+          - provenance
+          - sample-app
+        env:
+          # Point our exporters at the self-hosted collector instead of SigNoz Cloud.
+          OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+          SIGNOZ_INGESTION_KEY: ""

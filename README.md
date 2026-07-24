@@ -142,6 +142,11 @@ inside the image and `git blame`-based resolution behaves identically to a bare-
 `sample_app`'s `REPO_ROOT` depends on this. Override `OTEL_EXPORTER_OTLP_ENDPOINT` and
 `SIGNOZ_INGESTION_KEY` via a `.env` file to point the containers at SigNoz Cloud.
 
+**Run the whole demo locally, no Cloud, no login wall.** Our hosted demo uses SigNoz Cloud
+(no anonymous sharing). To reproduce end-to-end against a **self-hosted SigNoz you control** —
+either one command via Foundry ([`casting.yaml`](casting.yaml)) or your own SigNoz + our compose —
+see **[docs/dev/reproduce.md](docs/dev/reproduce.md)**.
+
 ```bash
 curl http://localhost:8000/health                                           # {"status":"ok","commit":"<sha>"}
 curl -X POST http://localhost:8000/checkout -d '{"discount_code":"10","subtotal":100}'
