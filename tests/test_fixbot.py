@@ -7,7 +7,6 @@ verify-before-commit gate, branch hygiene), not the model's judgment.
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -144,54 +143,63 @@ def test_build_genealogy_missing_file_raises(tmp_path: Path, monkeypatch):
 # --- propose_fix (mocked model) --------------------------------------------------------------
 
 
-class _FakeFunction:
-    def __init__(self, input_: dict):
-        self.name = "submit_fix"
-        self.arguments = json.dumps(input_)
-
-
-class _FakeToolCall:
-    def __init__(self, input_: dict):
-        self.function = _FakeFunction(input_)
+def _sectioned_response(
+    explanation: str, lesson: str, fixed_file_content: str, regression_test_code: str
+) -> str:
+    """Build a well-formed response in the plain-text ===SECTION=== protocol `_prompt` asks
+    the model to follow (see codeautopsy/fixbot/core.py for why this replaced JSON tool-use).
+    """
+    return (
+        "===EXPLANATION===\n"
+        f"{explanation}\n"
+        "===LESSON===\n"
+        f"{lesson}\n"
+        "===FIXED_FILE===\n"
+        f"{fixed_file_content}\n"
+        "===REGRESSION_TEST===\n"
+        f"{regression_test_code}\n"
+        "===END===\n"
+    )
 
 
 class _FakeMessage:
-    def __init__(self, input_: dict):
-        self.tool_calls = [_FakeToolCall(input_)]
+    def __init__(self, content: str):
+        self.content = content
 
 
 class _FakeChoice:
-    def __init__(self, input_: dict):
-        self.message = _FakeMessage(input_)
+    def __init__(self, content: str):
+        self.message = _FakeMessage(content)
 
 
 class _FakeCompletion:
-    def __init__(self, input_: dict):
-        self.choices = [_FakeChoice(input_)]
+    def __init__(self, content: str):
+        self.choices = [_FakeChoice(content)]
 
 
 class _FakeCompletions:
-    def __init__(self, input_: dict):
-        self._input = input_
+    def __init__(self, content: str):
+        self._content = content
 
     def create(self, **kwargs):
-        return _FakeCompletion(self._input)
+        return _FakeCompletion(self._content)
 
 
 class _FakeChat:
-    def __init__(self, input_: dict):
-        self.completions = _FakeCompletions(input_)
+    def __init__(self, content: str):
+        self.completions = _FakeCompletions(content)
 
 
 class _FakeGroqClient:
-    def __init__(self, input_: dict, **kwargs):
-        self.chat = _FakeChat(input_)
+    def __init__(self, content: str, **kwargs):
+        self.chat = _FakeChat(content)
 
 
 def _patch_groq(monkeypatch, proposal_input: dict):
     import groq
 
-    monkeypatch.setattr(groq, "Groq", lambda **kwargs: _FakeGroqClient(proposal_input))
+    content = _sectioned_response(**proposal_input)
+    monkeypatch.setattr(groq, "Groq", lambda **kwargs: _FakeGroqClient(content))
 
 
 def test_propose_fix_parses_tool_use_response(tmp_path: Path, monkeypatch):
@@ -212,6 +220,133 @@ def test_propose_fix_parses_tool_use_response(tmp_path: Path, monkeypatch):
     proposal = propose_fix(genealogy, settings)
     assert isinstance(proposal, FixProposal)
     assert "validate" in proposal.explanation
+    assert "def parse_amount" in proposal.fixed_file_content
+
+
+class _SequencedCompletions:
+    def __init__(self, responses: list):
+        self._responses = list(responses)
+
+    def create(self, **kwargs):
+        item = self._responses.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, dict):
+            item = _sectioned_response(**item)
+        return _FakeCompletion(item)
+
+
+class _SequencedChat:
+    def __init__(self, responses: list):
+        self.completions = _SequencedCompletions(responses)
+
+
+class _SequencedGroqClient:
+    def __init__(self, responses: list, **kwargs):
+        self.chat = _SequencedChat(responses)
+
+
+def _patch_groq_sequence(monkeypatch, responses: list):
+    import groq
+
+    monkeypatch.setattr(groq, "Groq", lambda **kwargs: _SequencedGroqClient(responses))
+
+
+def test_propose_fix_strips_markdown_fences(tmp_path: Path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    settings = _settings_for(repo)
+    _patch_groq(
+        monkeypatch,
+        {
+            "explanation": "validate before parsing",
+            "fixed_file_content": "```python\n" + FIXED_SOURCE + "```",
+            "regression_test_code": "```\n" + REGRESSION_TEST + "```",
+            "lesson": "always validate external input before int()",
+        },
+    )
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
+    proposal = propose_fix(genealogy, settings)
+    assert not proposal.fixed_file_content.strip().startswith("```")
+    assert not proposal.fixed_file_content.strip().endswith("```")
+    assert "def parse_amount" in proposal.fixed_file_content
+    assert not proposal.regression_test_code.strip().startswith("```")
+
+
+def test_propose_fix_repairs_syntax_error_then_succeeds(tmp_path: Path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    settings = _settings_for(repo)
+    broken = {
+        "explanation": "attempted fix",
+        "fixed_file_content": "def parse_amount(code:\n    return int(code)",  # invalid syntax
+        "regression_test_code": REGRESSION_TEST,
+        "lesson": "n/a",
+    }
+    fixed = {
+        "explanation": "validate before parsing",
+        "fixed_file_content": FIXED_SOURCE,
+        "regression_test_code": REGRESSION_TEST,
+        "lesson": "always validate external input before int()",
+    }
+    _patch_groq_sequence(monkeypatch, [broken, fixed])
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
+    proposal = propose_fix(genealogy, settings)
+    assert "def parse_amount" in proposal.fixed_file_content
+    assert "not code.isdigit()" in proposal.fixed_file_content
+
+
+def test_propose_fix_raises_cleanly_after_repeated_syntax_errors(tmp_path: Path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    settings = _settings_for(repo)
+    broken = {
+        "explanation": "attempted fix",
+        "fixed_file_content": "def parse_amount(code:\n    return int(code)",
+        "regression_test_code": REGRESSION_TEST,
+        "lesson": "n/a",
+    }
+    _patch_groq_sequence(monkeypatch, [broken, broken, broken])
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
+    with pytest.raises(FixBotError, match="invalid Python"):
+        propose_fix(genealogy, settings)
+
+
+def test_propose_fix_converts_groq_error_to_fixboterror(tmp_path: Path, monkeypatch):
+    import groq
+
+    repo = _init_repo(tmp_path)
+    settings = _settings_for(repo)
+    _patch_groq_sequence(
+        monkeypatch,
+        [groq.GroqError("400 tool_use_failed")] * 3,
+    )
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
+    with pytest.raises(FixBotError, match="model call failed"):
+        propose_fix(genealogy, settings)
+
+
+def test_propose_fix_recovers_from_one_groq_error(tmp_path: Path, monkeypatch):
+    import groq
+
+    repo = _init_repo(tmp_path)
+    settings = _settings_for(repo)
+    fixed = {
+        "explanation": "validate before parsing",
+        "fixed_file_content": FIXED_SOURCE,
+        "regression_test_code": REGRESSION_TEST,
+        "lesson": "always validate external input before int()",
+    }
+    _patch_groq_sequence(monkeypatch, [groq.GroqError("400 tool_use_failed"), fixed])
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
+    proposal = propose_fix(genealogy, settings)
     assert "def parse_amount" in proposal.fixed_file_content
 
 
@@ -339,39 +474,39 @@ def test_git_helper_raises_fixboterror_on_failure(tmp_path: Path):
         _core_git(tmp_path, "not-a-real-git-command")
 
 
-def test_propose_fix_raises_when_model_never_calls_submit_fix(tmp_path: Path, monkeypatch):
+def test_propose_fix_raises_cleanly_when_response_missing_section_markers(
+    tmp_path: Path, monkeypatch
+):
     repo = _init_repo(tmp_path)
     settings = _settings_for(repo)
-
-    class _NoToolCallMessage:
-        tool_calls = []
-
-    class _NoToolCallChoice:
-        message = _NoToolCallMessage()
-
-    class _NoToolCallCompletion:
-        choices = [_NoToolCallChoice()]
-
-    class _NoToolCallCompletions:
-        def create(self, **kwargs):
-            return _NoToolCallCompletion()
-
-    class _NoToolCallChat:
-        completions = _NoToolCallCompletions()
-
-    class _NoToolCallClient:
-        def __init__(self, **kwargs):
-            self.chat = _NoToolCallChat()
-
-    import groq
-
-    monkeypatch.setattr(groq, "Groq", lambda **kwargs: _NoToolCallClient())
-
+    # Plain prose with no ===SECTION=== markers at all.
+    _patch_groq_sequence(
+        monkeypatch,
+        ["Sure, here's a fix for your bug: just add a check before splitting."] * 3,
+    )
     from codeautopsy.fixbot.models import Genealogy
 
     genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
-    with pytest.raises(FixBotError, match="submit_fix"):
+    with pytest.raises(FixBotError, match="required ===SECTION=== format"):
         propose_fix(genealogy, settings)
+
+
+def test_propose_fix_repairs_missing_markers_then_succeeds(tmp_path: Path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    settings = _settings_for(repo)
+    malformed = "Sure, here's a fix — but I forgot the markers entirely."
+    fixed = {
+        "explanation": "validate before parsing",
+        "fixed_file_content": FIXED_SOURCE,
+        "regression_test_code": REGRESSION_TEST,
+        "lesson": "always validate external input before int()",
+    }
+    _patch_groq_sequence(monkeypatch, [malformed, fixed])
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(file_path="app.py", line=2, commit_sha="x", file_content=BUGGY_SOURCE)
+    proposal = propose_fix(genealogy, settings)
+    assert "def parse_amount" in proposal.fixed_file_content
 
 
 def test_open_pull_request_returns_none_without_remote(tmp_path: Path):

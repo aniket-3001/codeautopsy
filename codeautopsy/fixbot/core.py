@@ -1,14 +1,14 @@
 """Fix Bot — the loop-closer.
 
 `resolve` told us *why* a line was written (the agent's own reasoning) and *what* actually
-broke it (the incident log). The Fix Bot feeds both back to the agent, verified as a *tool
-call* (not parsed prose) so the response is always well-formed, applies the patch, proves it
-with a real regression test derived from the exact failing input, and — only if that test
-actually passes — commits it on its own branch and opens a PR carrying the chain of custody
-as evidence.
+broke it (the incident log). The Fix Bot feeds both back to the agent, parses its response
+against a fixed plain-text section format (not JSON — see the note on `propose_fix` for why),
+applies the patch, proves it with a real regression test derived from the exact failing input,
+and — only if that test actually passes — commits it on its own branch and opens a PR carrying
+the chain of custody as evidence.
 
 Model calls go through Groq (OpenAI-compatible chat-completions API, free tier) rather than a
-paid provider — forced tool-choice gives the same structured, no-prose-parsing guarantee.
+paid provider.
 
 Safety: this mutates a git working tree, so every step that touches it refuses to run unless
 the tree is clean beforehand, and failed verification never leaves a commit behind.
@@ -16,7 +16,8 @@ the tree is clean beforehand, and failed verification never leaves a commit behi
 
 from __future__ import annotations
 
-import json
+import ast
+import re
 import subprocess
 from pathlib import Path
 
@@ -24,46 +25,6 @@ from codeautopsy.config import Settings, get_settings
 from codeautopsy.enricher.core import resolve_decision
 from codeautopsy.enricher.incidents import latest_incident_for
 from codeautopsy.fixbot.models import FixBotResult, FixProposal, Genealogy
-
-FIX_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "submit_fix",
-        "description": "Submit the corrected file content and a regression test proving the fix.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "explanation": {
-                    "type": "string",
-                    "description": (
-                        "One short paragraph: what was wrong and why this fix is correct."
-                    ),
-                },
-                "fixed_file_content": {
-                    "type": "string",
-                    "description": "The FULL corrected content of the source file, ready to write.",
-                },
-                "regression_test_code": {
-                    "type": "string",
-                    "description": (
-                        "A complete, standalone pytest test function (its own `def test_...():` "
-                        "block, including any needed imports at the top) that reproduces the "
-                        "exact original crash via the app's real entrypoint and asserts it no "
-                        "longer raises / now behaves correctly."
-                    ),
-                },
-                "lesson": {
-                    "type": "string",
-                    "description": (
-                        "One sentence generalizing the mistake into a rule ('always validate "
-                        "external input before int()'), to feed back into the agent's own rules."
-                    ),
-                },
-            },
-            "required": ["explanation", "fixed_file_content", "regression_test_code", "lesson"],
-        },
-    },
-}
 
 
 class FixBotError(RuntimeError):
@@ -127,14 +88,88 @@ Current full content of {genealogy.file_path}:
 
 Fix the bug with minimal, targeted changes — do not rewrite unrelated code. Then write one
 standalone pytest regression test that reproduces the exact original crash (using the
-triggering input above) against the app's real entrypoint (e.g. FastAPI TestClient importing
-`codeautopsy.sample_app.main`) and asserts the fixed behavior. Call `submit_fix` with the
-result."""
+triggering input above) by importing the actual module at `{genealogy.file_path}` — derive the
+import from that file's real location in this repo, not from any other project's layout you may
+be familiar with.
+
+Respond in PLAIN TEXT using EXACTLY this format — no JSON, no markdown code fences, nothing
+before or after. Each marker below must appear alone on its own line, exactly as written:
+
+===EXPLANATION===
+<one short paragraph: what was wrong and why this fix is correct>
+===LESSON===
+<one sentence generalizing the mistake into a rule, e.g. "always validate external input
+before int()", to feed back into your own rules>
+===FIXED_FILE===
+<the FULL corrected content of {genealogy.file_path}, raw source only>
+===REGRESSION_TEST===
+<a complete, standalone pytest test — its own `def test_...():` block plus any needed
+imports at the top, raw source only>
+===END===
+"""
+
+
+def _strip_code_fence(text: str) -> str:
+    """Model output is untrusted: it's told not to use markdown fences but sometimes does
+    anyway. Strip a leading/trailing ``` fence (with optional language tag) if present.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return text
+    lines = stripped.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines)
+
+
+def _python_syntax_error(code: str) -> str | None:
+    """Return a human-readable syntax error message, or None if `code` parses cleanly."""
+    try:
+        ast.parse(code)
+    except SyntaxError as exc:
+        return f"{exc.msg} at line {exc.lineno}"
+    return None
+
+
+_MAX_ATTEMPTS = 3
+
+
+_SECTION_PATTERN = re.compile(
+    r"===EXPLANATION===\s*(?P<explanation>.*?)\s*"
+    r"===LESSON===\s*(?P<lesson>.*?)\s*"
+    r"===FIXED_FILE===\s*(?P<fixed_file_content>.*?)\s*"
+    r"===REGRESSION_TEST===\s*(?P<regression_test_code>.*?)\s*"
+    r"===END===",
+    re.DOTALL,
+)
+
+
+def _parse_sectioned_response(text: str) -> dict[str, str] | None:
+    """Parse the plain-text `===SECTION===` protocol `_prompt` asks the model to follow.
+
+    Deliberately not JSON: earlier attempts used forced tool-calling, but a model
+    JSON-encoding multi-line source that itself contains quotes reliably produces
+    malformed JSON (an unescaped or missing quote) that Groq's own parser rejects
+    before the response ever reaches us. Plain delimited text has no escaping to get
+    wrong, which removes that whole failure class rather than papering over it.
+    """
+    match = _SECTION_PATTERN.search(text)
+    if not match:
+        return None
+    return match.groupdict()
 
 
 def propose_fix(genealogy: Genealogy, settings: Settings | None = None) -> FixProposal:
-    """Ask the model to patch its own mistake. Uses forced tool-use so the response is
-    always structured — no prose-parsing, no ambiguity about what to apply.
+    """Ask the model to patch its own mistake, parsing its response against the fixed
+    plain-text section format described in `_prompt`.
+
+    Even with an exact format to follow, the model can still ignore it (missing a
+    marker), wrap code in markdown fences despite instructions not to, or emit
+    syntactically invalid Python. Each of those gets one repair attempt (re-prompted
+    with the specific problem) before giving up with a clean FixBotError — never a raw
+    groq.GroqError or SyntaxError reaching the CLI user.
     """
     settings = settings or get_settings()
     if not settings.groq_api_key:
@@ -145,19 +180,80 @@ def propose_fix(genealogy: Genealogy, settings: Settings | None = None) -> FixPr
     import groq
 
     client = groq.Groq(api_key=settings.groq_api_key)
-    response = client.chat.completions.create(  # type: ignore[call-overload]
-        model=settings.fixbot_model,
-        max_tokens=4096,
-        tools=[FIX_TOOL],
-        tool_choice={"type": "function", "function": {"name": "submit_fix"}},
-        messages=[{"role": "user", "content": _prompt(genealogy)}],
-    )
+    messages: list[dict] = [{"role": "user", "content": _prompt(genealogy)}]
+    last_error = ""
 
-    tool_calls = response.choices[0].message.tool_calls or []
-    for call in tool_calls:
-        if call.function.name == "submit_fix":
-            return FixProposal(**json.loads(call.function.arguments))
-    raise FixBotError("model did not return a submit_fix tool call")
+    for attempt in range(_MAX_ATTEMPTS):
+        final_attempt = attempt + 1 >= _MAX_ATTEMPTS
+        try:
+            response = client.chat.completions.create(
+                model=settings.fixbot_model,
+                max_tokens=4096,
+                messages=messages,  # type: ignore[arg-type]
+            )
+        except groq.GroqError as exc:
+            last_error = str(exc)
+            if final_attempt:
+                raise FixBotError(f"model call failed: {last_error}") from exc
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Your previous request failed: {last_error}\nTry again.",
+                }
+            )
+            continue
+
+        content = response.choices[0].message.content or ""
+        proposal_kwargs = _parse_sectioned_response(content)
+
+        if proposal_kwargs is None:
+            last_error = "response did not follow the required ===SECTION=== format"
+            if final_attempt:
+                raise FixBotError(last_error)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Your response did not follow the required format. Reply again "
+                        "using exactly the ===EXPLANATION===/===LESSON===/===FIXED_FILE===/"
+                        "===REGRESSION_TEST===/===END=== markers, each alone on its own "
+                        "line, with no JSON and no markdown fences."
+                    ),
+                }
+            )
+            continue
+
+        proposal_kwargs["fixed_file_content"] = _strip_code_fence(
+            proposal_kwargs["fixed_file_content"]
+        )
+        proposal_kwargs["regression_test_code"] = _strip_code_fence(
+            proposal_kwargs["regression_test_code"]
+        )
+
+        syntax_errors = {
+            field: _python_syntax_error(proposal_kwargs[field])
+            for field in ("fixed_file_content", "regression_test_code")
+        }
+        syntax_errors = {k: v for k, v in syntax_errors.items() if v}
+        if syntax_errors:
+            last_error = "; ".join(f"{k}: {v}" for k, v in syntax_errors.items())
+            if final_attempt:
+                raise FixBotError(f"model produced invalid Python: {last_error}")
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Your submitted code has a syntax error: {last_error}\n"
+                        "Reply again with corrected, syntactically valid Python in both "
+                        "sections, using the same === marker format."
+                    ),
+                }
+            )
+            continue
+
+        return FixProposal(**proposal_kwargs)
+
+    raise FixBotError(f"model failed to produce a usable fix: {last_error}")
 
 
 def apply_fix(
