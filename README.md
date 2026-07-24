@@ -77,6 +77,10 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 | Fix Bot | `codeautopsy/fixbot/` | `codeautopsy fix <trace>` — patch, verify, commit, PR |
 | MCP server | `codeautopsy/mcp/` | `codeautopsy-mcp` — exposes `autopsy`/`prognose`/`leaderboard` as agent-callable tools |
 
+**Docs:** [semantic conventions](docs/dev/semconv.md) (the `codeautopsy.*` span attributes) ·
+[Fix Bot governance](docs/dev/governance.md) (autonomy levels — the loop stops at a PR) ·
+[operations](docs/dev/operations.md) · [reproduce locally](docs/dev/reproduce.md).
+
 ## MCP server — CodeAutopsy as agent-callable tools
 
 Most Agents-of-SigNoz projects *consume* SigNoz's MCP server so their agent can read telemetry.
