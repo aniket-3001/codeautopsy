@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from codeautopsy.provenance.confidence import attribution_confidence
 from codeautopsy.provenance.models import ProvenanceRecord, ResolveRequest, ResolveResponse
 from codeautopsy.provenance.store import ProvenanceStoreProtocol
 
@@ -68,6 +69,12 @@ def blame_introducing_commit(
     return origin[0] if origin else None
 
 
+def _resolved(resp: ResolveResponse, req: ResolveRequest) -> ResolveResponse:
+    """Attach the attribution-confidence score/factors to a resolved response and return it."""
+    resp.confidence, resp.confidence_factors = attribution_confidence(resp, req)
+    return resp
+
+
 def resolve(
     store: ProvenanceStoreProtocol,
     req: ResolveRequest,
@@ -86,11 +93,14 @@ def resolve(
     # Fast path: a decision recorded directly against the deployed commit.
     direct = store.find_by_line(req.commit_sha, req.file_path, req.line, org_id=org_id)
     if direct is not None:
-        return ResolveResponse(
-            resolved=True,
-            introducing_commit=req.commit_sha,
-            record=direct,
-            detail="matched decision recorded at the deployed commit",
+        return _resolved(
+            ResolveResponse(
+                resolved=True,
+                introducing_commit=req.commit_sha,
+                record=direct,
+                detail="matched decision recorded at the deployed commit",
+            ),
+            req,
         )
 
     # Blame path: find which commit introduced the crashing line, and at which original line
@@ -101,14 +111,17 @@ def resolve(
             introducing, orig_line = origin
             rec = store.find_by_line(introducing, req.file_path, orig_line, org_id=org_id)
             if rec is not None:
-                return ResolveResponse(
-                    resolved=True,
-                    introducing_commit=introducing,
-                    record=rec,
-                    detail=(
-                        f"matched via git blame to {introducing[:8]} "
-                        f"at original line {orig_line}"
+                return _resolved(
+                    ResolveResponse(
+                        resolved=True,
+                        introducing_commit=introducing,
+                        record=rec,
+                        detail=(
+                            f"matched via git blame to {introducing[:8]} "
+                            f"at original line {orig_line}"
+                        ),
                     ),
+                    req,
                 )
             return ResolveResponse(
                 resolved=False,

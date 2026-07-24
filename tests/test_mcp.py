@@ -60,6 +60,10 @@ def test_autopsy_resolves_a_decision_at_the_deployed_commit(store: ProvenanceSto
     assert out["risk_flags"] == ["unvalidated-input"]
     assert out["line_range"] == [40, 46]
     assert out["coordinate"] == "app/payment.py:42@abc123def456"
+    # Attribution confidence rides along on the payload — exact-commit hit here.
+    assert isinstance(out["confidence"], float)
+    assert out["confidence_factors"]["match"] == "exact-commit"
+    assert out["confidence_factors"]["label"] in {"high", "medium", "low"}
 
 
 def test_autopsy_unresolved_is_truthful(store: ProvenanceStore) -> None:

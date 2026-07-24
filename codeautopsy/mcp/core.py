@@ -50,6 +50,8 @@ def _autopsy_payload(
         "line_range": [rec.line_start, rec.line_end],
         "decision_trace_id": rec.decision_trace_id,
         "decision_span_id": rec.decision_span_id,
+        "confidence": resp.confidence,
+        "confidence_factors": resp.confidence_factors,
         "detail": resp.detail,
     }
 

@@ -72,10 +72,18 @@ def autopsy(
 
     rec = data["record"]
     risk = ", ".join(rec["risk_flags"]) if rec["risk_flags"] else "none"
+    conf = ""
+    if data.get("confidence") is not None:
+        f = data.get("confidence_factors") or {}
+        conf = (
+            f"confidence:      {round(data['confidence'] * 100)}% "
+            f"({f.get('label', '?')}, via {f.get('match', '?')})\n"
+        )
     body = (
         f"[bold]\"{rec['reasoning_summary']}\"[/bold]\n\n"
         f"file:            {rec['file_path']}:{rec['line_start']}-{rec['line_end']}\n"
         f"introducing commit: {data['introducing_commit'][:12]}\n"
+        f"{conf}"
         f"risk flags:      {risk}\n"
         f"decision id:     {rec['decision_id']}\n"
         f"session:         {rec['session_id']}\n"

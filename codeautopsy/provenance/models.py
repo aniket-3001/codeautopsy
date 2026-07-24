@@ -66,6 +66,11 @@ class ResolveResponse(BaseModel):
     introducing_commit: str | None = None
     record: ProvenanceRecord | None = None
     detail: str = ""
+    # How confidently this decision is the author of the crashing line (0–1), with a factors
+    # dict explaining why (match kind, range width, position). Populated for resolved responses
+    # by the indexer; None when unresolved. See provenance/confidence.py.
+    confidence: float | None = None
+    confidence_factors: dict | None = None
     # Populated only by autopsy_exception() — the crash span's own (trace_id, span_id),
     # hex-encoded, so a caller can deep-link straight into that trace in SigNoz.
     crash_trace_id: str | None = None

@@ -176,6 +176,15 @@ def autopsy_exception(
         span.set_attribute("codeautopsy.decision.span_id", rec.decision_span_id)
         span.set_attribute("codeautopsy.risk_flags", ",".join(rec.risk_flags))
         span.set_attribute("codeautopsy.decision.session_id", rec.session_id)
+        if resolution.confidence is not None:
+            span.set_attribute("codeautopsy.attribution.confidence", resolution.confidence)
+        if resolution.confidence_factors:
+            span.set_attribute(
+                "codeautopsy.attribution.label", resolution.confidence_factors["label"]
+            )
+            span.set_attribute(
+                "codeautopsy.attribution.match", resolution.confidence_factors["match"]
+            )
         span.set_status(Status(StatusCode.OK))
     else:
         span.set_attribute(
