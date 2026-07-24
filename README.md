@@ -75,6 +75,39 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 | Enricher | `codeautopsy/enricher/` | On exception, mints the linked `codeautopsy.autopsy` span |
 | Coroner CLI | `codeautopsy/cli/` | `codeautopsy autopsy <trace>` — the chain of custody |
 | Fix Bot | `codeautopsy/fixbot/` | `codeautopsy fix <trace>` — patch, verify, commit, PR |
+| MCP server | `codeautopsy/mcp/` | `codeautopsy-mcp` — exposes `autopsy`/`prognose`/`leaderboard` as agent-callable tools |
+
+## MCP server — CodeAutopsy as agent-callable tools
+
+Most Agents-of-SigNoz projects *consume* SigNoz's MCP server so their agent can read telemetry.
+CodeAutopsy points the plug the other way: it **is** an MCP server, exposing the one thing only
+CodeAutopsy knows — the map from a crashing line back to the AI decision that authored it — so any
+MCP client (Cursor, Claude Desktop, an IDE) gets three tools on its menu:
+
+| Tool | Question it answers |
+|---|---|
+| `autopsy(commit, file, line)` | Which AI coding decision authored this crashing line? |
+| `prognose(code)` | What's this snippet's risk, priced against real crash history? |
+| `leaderboard()` | Which AI tools/models crash most in production? |
+
+```bash
+pip install -e ".[mcp]"    # brings in the `mcp` package
+codeautopsy-mcp            # runs the server over stdio (the transport clients launch)
+```
+
+Register it with a client by pointing a stdio server at the `codeautopsy-mcp` command:
+
+```jsonc
+// e.g. Claude Desktop / Cursor mcp config
+{
+  "mcpServers": {
+    "codeautopsy": { "command": "codeautopsy-mcp" }
+  }
+}
+```
+
+The server reads the developer's **own** local provenance index (SQLite, or Postgres when
+`DATABASE_URL` is set) — no network hop. See `docs/dev/operations.md` for details.
 
 ## Quickstart
 

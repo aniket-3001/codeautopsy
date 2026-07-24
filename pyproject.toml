@@ -38,6 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 fixbot = ["groq>=0.11"]
+mcp = ["mcp>=1.2"]
 dev = [
     "pytest>=8.1",
     "pytest-asyncio>=0.23",
@@ -56,6 +57,7 @@ codeautopsy = "codeautopsy.cli.main:app"
 codeautopsy-provenance = "codeautopsy.provenance.service:run"
 codeautopsy-sample = "codeautopsy.sample_app.main:run"
 codeautopsy-hook = "codeautopsy.recorder.hooks:main"
+codeautopsy-mcp = "codeautopsy.mcp.server:run"
 
 [build-system]
 requires = ["hatchling"]

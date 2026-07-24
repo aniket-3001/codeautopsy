@@ -19,7 +19,25 @@ Postgres instead.
 codeautopsy-provenance           # the FastAPI backend (binds from CODEAUTOPSY_PROVENANCE_URL)
 codeautopsy-sample               # the deliberately-buggy sample checkout app
 codeautopsy status               # provenance store + config summary
+codeautopsy-mcp                  # MCP server over stdio (needs the `.[mcp]` extra)
 ```
+
+### MCP server (`codeautopsy/mcp/`)
+
+CodeAutopsy *is* an MCP server — the inverse of the entries that consume SigNoz's MCP. It exposes
+three agent-callable tools (`autopsy`, `prognose`, `leaderboard`) over stdio, each reading the
+local provenance store (SQLite by default; Postgres when `DATABASE_URL` is set).
+
+```bash
+pip install -e ".[mcp]"          # the `mcp` package is an optional extra
+codeautopsy-mcp                  # launch over stdio (what an MCP client spawns)
+```
+
+Split by design: `core.py` is pure, `mcp`-package-free tool logic (unit-tested directly in
+`tests/test_mcp.py`); `server.py` is the thin FastMCP wiring behind the `codeautopsy-mcp` entry
+point, so importing the package never hard-requires `mcp`. Register with a client by pointing a
+stdio server at the `codeautopsy-mcp` command — see the README's *MCP server* section for a config
+snippet.
 
 ## Test / lint / type-check (the gate)
 
