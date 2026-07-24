@@ -34,16 +34,18 @@
 <div aria-hidden="true" class="bg-grid fixed inset-0 -z-10"></div>
 
 <header class="sticky top-0 z-20 border-b border-zinc-300/70 bg-[#f4f7fc]/80 backdrop-blur dark:border-zinc-900 dark:bg-[#0a0e1a]/75">
-  <div class="mx-auto flex max-w-4xl items-center justify-between px-5 py-3.5">
-    <a href="index.html" class="flex items-center gap-2">
+  <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3.5">
+    <a href="index.html" class="flex shrink-0 items-center gap-2">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h6" stroke="#6366f1" stroke-width="2.4" stroke-linecap="round"/><path d="M14 12h6" stroke="#22d3ee" stroke-width="2.4" stroke-linecap="round"/><circle cx="11" cy="12" r="2.1" fill="#6366f1"/><circle cx="17" cy="6" r="2.1" fill="#22d3ee"/></svg>
       <span class="serif text-xl leading-none tracking-tight">CodeAutopsy</span>
     </a>
-    <nav id="nav" class="flex items-center gap-4 text-sm font-medium text-zinc-500 dark:text-zinc-400"></nav>
+    <nav id="nav" class="flex min-w-0 items-center justify-end gap-1 text-sm font-medium text-zinc-500 dark:text-zinc-400"></nav>
   </div>
+  <!-- Collapsible menu for narrow screens; renderNav() fills and toggles this. -->
+  <div id="mobile-nav" class="hidden border-t border-zinc-300/70 px-3 py-2 xl:!hidden dark:border-zinc-900"></div>
 </header>
 
-<main id="main" class="mx-auto max-w-3xl px-5 py-14"></main>
+<main id="main" class="mx-auto max-w-4xl px-5 py-12"></main>
 
 <footer class="border-t border-zinc-300/70 px-5 py-10 text-center text-xs text-zinc-400 dark:border-zinc-900 dark:text-zinc-600">
   <p>Built for the WeMakeDevs × SigNoz hackathon — Track 3 · Agents of SigNoz.</p>
@@ -236,26 +238,67 @@ async function render() {
   }
 }
 
+const NAV_ITEMS = [
+  ["#/dashboard", "Dashboard"],
+  ["#/autopsy", "Live Autopsy"],
+  ["#/prognose", "Prognosis"],
+  ["#/leaderboard", "Leaderboard"],
+  ["#/risk-gate", "Risk Gate"],
+  ["#/autoheal", "Auto-Heal"],
+  ["#/integrate", "Integrate"],
+  ["#/settings", "Settings"],
+];
+
+function currentRoute() {
+  const h = location.hash || "#/";
+  return h === "#/" ? "#/dashboard" : h;
+}
+
+function navLink(href, label, { block = false } = {}) {
+  const active = currentRoute() === href;
+  const shape = block ? "block rounded-lg px-3 py-2.5" : "whitespace-nowrap rounded-lg px-3 py-1.5";
+  const state = active
+    ? "bg-indigo-500/10 text-indigo-600 dark:bg-indigo-400/15 dark:text-indigo-300"
+    : "text-zinc-500 hover:bg-zinc-500/10 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100";
+  return `<a href="${href}" aria-current="${active ? "page" : "false"}" class="${shape} transition ${state}">${label}</a>`;
+}
+
 function renderNav() {
   const nav = document.getElementById("nav");
-  if (getToken()) {
+  const mobile = document.getElementById("mobile-nav");
+  if (!getToken()) {
+    mobile.classList.add("hidden");
+    mobile.innerHTML = "";
     nav.innerHTML = `
-      <a href="#/dashboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Dashboard</a>
-      <a href="#/autopsy" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Live Autopsy</a>
-      <a href="#/prognose" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Prognosis</a>
-      <a href="#/leaderboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Leaderboard</a>
-      <a href="#/risk-gate" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Risk Gate</a>
-      <a href="#/autoheal" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Auto-Heal</a>
-      <a href="#/integrate" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Integrate</a>
-      <a href="#/settings" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Settings</a>
-      <span class="mono hidden text-xs text-zinc-400 sm:inline">${esc(getEmail())}</span>
-      <button id="btn-logout" class="rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Log out</button>`;
-    document.getElementById("btn-logout").addEventListener("click", () => { clearSession(); navigate("#/home"); });
-  } else {
-    nav.innerHTML = `
-      <a href="#/login" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Log in</a>
-      <a href="#/signup" class="rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Sign up</a>`;
+      ${navLink("#/login", "Log in")}
+      <a href="#/signup" class="whitespace-nowrap rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Sign up</a>`;
+    return;
   }
+
+  const links = NAV_ITEMS.map(([h, l]) => navLink(h, l)).join("");
+  nav.innerHTML = `
+    <div class="hidden items-center gap-0.5 xl:flex">${links}</div>
+    <span class="mono ml-2 hidden max-w-[14ch] truncate text-xs text-zinc-400 2xl:inline" title="${esc(getEmail())}">${esc(getEmail())}</span>
+    <button id="btn-logout" class="ml-1 hidden whitespace-nowrap rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 xl:inline-block dark:bg-white dark:text-black dark:hover:bg-zinc-200">Log out</button>
+    <button id="nav-toggle" aria-label="Menu" class="inline-flex items-center justify-center rounded-lg p-2 text-zinc-600 transition hover:bg-zinc-500/10 xl:hidden dark:text-zinc-300">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>`;
+
+  // Stacked menu revealed by the hamburger on narrow screens.
+  mobile.innerHTML = `
+    <div class="mx-auto max-w-6xl space-y-0.5">
+      ${NAV_ITEMS.map(([h, l]) => navLink(h, l, { block: true })).join("")}
+      <div class="mt-2 flex items-center justify-between border-t border-zinc-300/70 px-3 pt-2 dark:border-zinc-900">
+        <span class="mono truncate text-xs text-zinc-400">${esc(getEmail())}</span>
+        <button id="btn-logout-m" class="whitespace-nowrap rounded-full bg-zinc-950 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200">Log out</button>
+      </div>
+    </div>`;
+  mobile.classList.add("hidden"); // closed on every navigation
+
+  const logout = () => { clearSession(); navigate("#/home"); };
+  document.getElementById("btn-logout").addEventListener("click", logout);
+  document.getElementById("btn-logout-m").addEventListener("click", logout);
+  document.getElementById("nav-toggle").addEventListener("click", () => mobile.classList.toggle("hidden"));
 }
 
 // --- views --------------------------------------------------------------------------------
