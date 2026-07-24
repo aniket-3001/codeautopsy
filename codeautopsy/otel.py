@@ -10,9 +10,12 @@ from __future__ import annotations
 import sys
 
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -69,3 +72,29 @@ def build_logger_provider(
     )
     provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
     return provider
+
+
+def build_meter_provider(
+    service_name: str,
+    service_version: str = "0.1.0",
+    resource_attrs: dict | None = None,
+    settings: Settings | None = None,
+    export_interval_ms: int = 10000,
+) -> MeterProvider:
+    """A MeterProvider so the sample app can emit a crash counter SigNoz can alert on.
+
+    This is the metric that closes the Auto-Heal loop: a real OTel Counter exported to
+    SigNoz, where an alert rule watches its rate and fires the heal webhook. Short export
+    interval so a crash storm shows up in SigNoz (and trips the alert) within seconds, not
+    minutes — the demo can't wait for a default 60s push.
+    """
+    settings = settings or get_settings()
+    exporter = OTLPMetricExporter(
+        endpoint=settings.metrics_endpoint(),
+        headers=settings.otel_headers or None,
+    )
+    reader = PeriodicExportingMetricReader(exporter, export_interval_millis=export_interval_ms)
+    return MeterProvider(
+        resource=_resource(service_name, service_version, resource_attrs),
+        metric_readers=[reader],
+    )

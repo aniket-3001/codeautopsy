@@ -13,13 +13,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from opentelemetry import trace
+from opentelemetry import metrics, trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import Status, StatusCode
 
 from codeautopsy.config import get_settings
 from codeautopsy.enricher.core import autopsy_exception, locate_crash_frame
-from codeautopsy.otel import build_tracer_provider, force_utf8_stdout
+from codeautopsy.otel import build_meter_provider, build_tracer_provider, force_utf8_stdout
 
 force_utf8_stdout()
 
@@ -58,6 +58,23 @@ _provider = build_tracer_provider(
 )
 trace.set_tracer_provider(_provider)
 tracer = trace.get_tracer("codeautopsy.sample_app")
+
+_meter_provider = build_meter_provider(
+    settings.runtime_service_name,
+    resource_attrs={"deployment.commit.sha": DEPLOYED_COMMIT_SHA},
+    settings=settings,
+)
+metrics.set_meter_provider(_meter_provider)
+meter = metrics.get_meter("codeautopsy.sample_app")
+
+# The metric that closes the Auto-Heal loop: a real OTel Counter SigNoz can alert on. When
+# a judge crashes this endpoint, this counter's rate spikes, a SigNoz alert rule fires its
+# webhook, and the heal loop kicks off.
+crash_counter = meter.create_counter(
+    "codeautopsy.crashes",
+    unit="1",
+    description="Unhandled crashes in the sample checkout app, by crashing file:line.",
+)
 
 app = FastAPI(title="CodeAutopsy Sample App — checkout-api")
 app.add_middleware(
@@ -104,6 +121,15 @@ def checkout(payload: dict) -> dict:
 
             key = (rel_path, lineno)
             _crash_counts[key] += 1
+            crash_counter.add(
+                1,
+                {
+                    "service.name": settings.runtime_service_name,
+                    "file": rel_path,
+                    "line": lineno,
+                    "commit.sha": DEPLOYED_COMMIT_SHA,
+                },
+            )
 
             resolution = autopsy_exception(
                 exc,
