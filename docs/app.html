@@ -198,7 +198,7 @@ function openModal(html) {
 function closeModal() { document.getElementById("modal-root").innerHTML = ""; }
 
 // --- router -------------------------------------------------------------------------------
-const PROTECTED = ["#/dashboard", "#/autopsy", "#/prognose", "#/integrate", "#/onboarding", "#/settings"];
+const PROTECTED = ["#/dashboard", "#/autopsy", "#/prognose", "#/leaderboard", "#/risk-gate", "#/integrate", "#/onboarding", "#/settings"];
 
 function navigate(hash) { location.hash = hash; }
 
@@ -220,6 +220,8 @@ async function render() {
     if (hash === "#/dashboard") return await renderDashboard();
     if (hash === "#/autopsy") return await renderAutopsy();
     if (hash === "#/prognose") return await renderPrognose();
+    if (hash === "#/leaderboard") return await renderLeaderboard();
+    if (hash === "#/risk-gate") return await renderRiskGate();
     if (hash === "#/integrate") return await renderIntegrate();
     if (hash === "#/settings") return await renderSettings();
     main.innerHTML = '<p class="text-sm text-zinc-500">Not found.</p>';
@@ -235,6 +237,8 @@ function renderNav() {
       <a href="#/dashboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Dashboard</a>
       <a href="#/autopsy" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Live Autopsy</a>
       <a href="#/prognose" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Prognosis</a>
+      <a href="#/leaderboard" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Leaderboard</a>
+      <a href="#/risk-gate" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Risk Gate</a>
       <a href="#/integrate" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Integrate</a>
       <a href="#/settings" class="transition hover:text-zinc-900 dark:hover:text-zinc-100">Settings</a>
       <span class="mono hidden text-xs text-zinc-400 sm:inline">${esc(getEmail())}</span>
@@ -426,6 +430,8 @@ async function renderDashboard() {
       <div class="flex flex-wrap gap-2">
         <a href="${BLAST_RADIUS_DASHBOARD}" target="_blank" rel="noopener" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Blast Radius in SigNoz ↗</a>
         <a href="#/prognose" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Prognosis →</a>
+        <a href="#/leaderboard" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Leaderboard →</a>
+        <a href="#/risk-gate" class="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-600 transition hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">Risk Gate →</a>
         <a href="#/autopsy" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-4 py-2 text-xs font-medium text-white transition hover:-translate-y-0.5">Run a Live Autopsy →</a>
       </div>
     </div>
@@ -822,6 +828,167 @@ async function renderPrognose() {
       copyToClipboard(document.getElementById(btn.dataset.copy).textContent, e.currentTarget)
     )
   );
+}
+
+async function renderLeaderboard() {
+  const board = await api("/v1/leaderboard", { headers: authHeaders() });
+  const scores = board.scores || [];
+  const pct = (r) => (r == null ? "—" : Math.round(r * 100) + "%");
+  const rateColor = (r) =>
+    r == null ? "text-zinc-400"
+      : r > 0.5 ? "text-rose-600 dark:text-rose-300"
+      : r > 0 ? "text-amber-600 dark:text-amber-300"
+      : "text-emerald-600 dark:text-emerald-300";
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <h1 class="serif text-3xl">Reliability Leaderboard</h1>
+    <p class="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+      Every AI tool and model your org has recorded, ranked by the only score that matters in production:
+      <span class="text-zinc-700 dark:text-zinc-200">how often its decisions actually crashed</span>. Same
+      provenance + incident join as Autopsy and Prognosis — aggregated by who authored the code.
+    </p>
+
+    <div class="mt-4 flex gap-5 text-sm text-zinc-500 dark:text-zinc-400">
+      <span><span class="font-medium text-zinc-800 dark:text-zinc-100">${board.total_decisions}</span> decisions</span>
+      <span><span class="font-medium text-zinc-800 dark:text-zinc-100">${board.total_incidents}</span> production incidents</span>
+    </div>
+
+    ${scores.length === 0 ? `
+      <div class="card mt-6 text-center">
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">No decisions recorded yet — record one with the CodeAutopsy hook, or run a Live Autopsy, to put the first model on the board.</p>
+      </div>` : `
+      <div class="card mt-6 !p-0 overflow-hidden">
+        <table class="w-full text-left text-sm">
+          <thead class="mono text-[11px] uppercase tracking-wider text-zinc-400">
+            <tr>
+              <th class="px-4 py-3">#</th>
+              <th class="px-4 py-3">tool / model</th>
+              <th class="px-4 py-3">crash rate</th>
+              <th class="px-4 py-3">decisions</th>
+              <th class="px-4 py-3">incidents</th>
+              <th class="px-4 py-3">worst flag</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${scores.map((s, i) => `
+              <tr class="border-t border-zinc-200/80 dark:border-zinc-800/80">
+                <td class="px-4 py-3 mono text-xs text-zinc-400">${i + 1}</td>
+                <td class="px-4 py-3">
+                  <div class="font-medium">${esc(s.tool)}</div>
+                  <div class="mono text-[11px] text-zinc-400">${esc(s.model)}</div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="h-1.5 w-20 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                      <div class="h-full rounded-full bg-gradient-to-r from-amber-400 to-rose-500" style="width:${Math.round((s.crash_rate || 0) * 100)}%"></div>
+                    </div>
+                    <span class="font-medium ${rateColor(s.crash_rate)}">${pct(s.crash_rate)}</span>
+                  </div>
+                  <div class="mono mt-0.5 text-[10px] text-zinc-400">${s.crashed_decisions}/${s.decisions} crashed</div>
+                </td>
+                <td class="px-4 py-3 mono text-xs text-zinc-400">${s.decisions}</td>
+                <td class="px-4 py-3 mono text-xs ${s.incidents_caused > 0 ? "text-rose-500 dark:text-rose-300" : "text-zinc-400"}">${s.incidents_caused}</td>
+                <td class="px-4 py-3">${s.worst_flag
+                    ? `<span class="mono text-xs">${esc(s.worst_flag)}</span>${s.worst_flag_rate != null ? ` <span class="text-[10px] text-zinc-400">· ${pct(s.worst_flag_rate)}</span>` : ""}`
+                    : `<span class="text-xs text-zinc-400">—</span>`}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`}
+
+    <a href="#/dashboard" class="mono mt-6 inline-block text-sm text-cyan-600 dark:text-cyan-400">Back to dashboard →</a>
+  `;
+}
+
+function riskGateResultHTML(resp) {
+  const pct = (r) => Math.round(r * 100) + "%";
+  if (resp.verdict === "clear") {
+    return `
+      <div class="card border-emerald-300 dark:border-emerald-800">
+        <div class="flex items-center gap-2">
+          <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
+          <p class="font-medium text-emerald-600 dark:text-emerald-300">Clear — no risk flags tripped</p>
+        </div>
+        <p class="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Nothing in this snippet matched a known risk pattern. Not a proof of correctness — just that it didn't take any of the shortcuts CodeAutopsy watches for.</p>
+      </div>`;
+  }
+  const headline = resp.verdict === "priced"
+    ? `<p class="font-medium text-rose-600 dark:text-rose-300">Priced — <span class="mono">${esc(resp.worst_flag)}</span> has crashed ${pct(resp.crash_rate)} of the time (${resp.sample_size} past decisions)</p>`
+    : `<p class="font-medium text-amber-600 dark:text-amber-300">Flagged — risk patterns found, but not enough history to price yet</p>`;
+  const dot = resp.verdict === "priced" ? "bg-rose-500" : "bg-amber-500";
+  const border = resp.verdict === "priced" ? "border-rose-300 dark:border-rose-800" : "border-amber-300 dark:border-amber-800";
+  return `
+    <div class="card ${border}">
+      <div class="flex items-center gap-2">
+        <span class="h-2 w-2 rounded-full ${dot}"></span>
+        ${headline}
+      </div>
+      <table class="mt-4 w-full text-left text-sm">
+        <thead class="mono text-[11px] uppercase tracking-wider text-zinc-400">
+          <tr><th class="py-2">flag</th><th class="py-2">historical crash rate</th><th class="py-2">samples</th></tr>
+        </thead>
+        <tbody>
+          ${(resp.flags || []).map((f) => `
+            <tr class="border-t border-zinc-200/80 dark:border-zinc-800/80">
+              <td class="py-2 mono text-xs">${esc(f.flag)}</td>
+              <td class="py-2">${f.crash_rate == null
+                  ? `<span class="text-xs text-zinc-400">not priced yet</span>`
+                  : `<span class="font-medium ${f.crash_rate > 0 ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300"}">${pct(f.crash_rate)}</span>`}</td>
+              <td class="py-2 mono text-xs text-zinc-400">${f.sample_size}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+      <p class="mt-4 text-xs text-zinc-400">This is exactly what Prognosis prices on every line of a pull request — here, computed for a raw snippet with no repo required, against your org's own history.</p>
+    </div>`;
+}
+
+async function renderRiskGate() {
+  const main = document.getElementById("main");
+  main.innerHTML = `
+    <h1 class="serif text-3xl">Risk Gate</h1>
+    <p class="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+      Prognosis, without a git repo. Paste any snippet — and optionally the reasoning behind it —
+      and CodeAutopsy scores it the same way it scores a PR line: it detects risk flags in the text,
+      then <span class="text-zinc-700 dark:text-zinc-200">prices them against your org's own historical crash rates</span>.
+    </p>
+
+    <div class="card mt-6">
+      <label class="mono text-[11px] uppercase tracking-wider text-zinc-400">code</label>
+      <textarea id="rg-code" rows="8" spellcheck="false" placeholder="def parse_discount(code):    return int(code)  # assume it's always a clean number" class="mono mt-2 w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs leading-6 outline-none focus:border-cyan-400 dark:border-zinc-800 dark:bg-black/40"></textarea>
+
+      <label class="mono mt-4 block text-[11px] uppercase tracking-wider text-zinc-400">reasoning <span class="normal-case text-zinc-500">(optional — what the agent said it was doing)</span></label>
+      <textarea id="rg-reasoning" rows="2" spellcheck="false" placeholder="I'll skip the validation for now, the input is always valid" class="mono mt-2 w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs leading-6 outline-none focus:border-cyan-400 dark:border-zinc-800 dark:bg-black/40"></textarea>
+
+      <div class="mt-4 flex items-center gap-3">
+        <button id="rg-score" class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-5 py-2 text-xs font-medium text-white transition hover:-translate-y-0.5">Score this →</button>
+        <span id="rg-status" class="text-xs text-zinc-400"></span>
+      </div>
+    </div>
+
+    <div id="rg-result" class="mt-6"></div>
+    <a href="#/dashboard" class="mono mt-6 inline-block text-sm text-cyan-600 dark:text-cyan-400">Back to dashboard →</a>
+  `;
+
+  const btn = document.getElementById("rg-score");
+  const runScore = async () => {
+    const code = document.getElementById("rg-code").value;
+    const reasoning = document.getElementById("rg-reasoning").value;
+    if (!code.trim() && !reasoning.trim()) return;
+    const status = document.getElementById("rg-status");
+    const result = document.getElementById("rg-result");
+    status.textContent = "Scoring…";
+    btn.disabled = true;
+    try {
+      const resp = await api("/v1/risk-gate", { method: "POST", headers: authHeaders(), body: { code, reasoning } });
+      result.innerHTML = riskGateResultHTML(resp);
+    } catch (e) {
+      result.innerHTML = `<div class="card border-rose-300 dark:border-rose-800"><p class="text-sm text-rose-600 dark:text-rose-300">${esc(e.message)}</p></div>`;
+    } finally {
+      status.textContent = "";
+      btn.disabled = false;
+    }
+  };
+  btn.addEventListener("click", runScore);
 }
 
 async function renderSettings() {
