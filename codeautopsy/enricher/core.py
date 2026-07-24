@@ -9,6 +9,7 @@ instead of a hand-constructed one.
 
 from __future__ import annotations
 
+import traceback
 from pathlib import Path
 
 import httpx
@@ -66,6 +67,30 @@ def resolve_decision(
         return ResolveResponse(**resp.json())
     except httpx.HTTPError as exc:
         return ResolveResponse(resolved=False, detail=f"provenance service unreachable: {exc}")
+
+
+def locate_crash_frame(exc: BaseException, repo_root: Path) -> tuple[str, int]:
+    """Find the (repo-relative file, line) that actually did the crashing app-side call.
+
+    The literal last traceback frame is not always the app's own code: if the app calls
+    into a library function (e.g. ``datetime.strptime``) and *that* raises, the last frame
+    lives inside the library/stdlib — a file that isn't part of the app's repo and can't be
+    blamed. Walk backwards from the end of the traceback for the last frame whose file is
+    actually under ``repo_root``; only fall back to the literal last frame (by bare
+    filename) if no frame in the whole traceback is inside the repo at all.
+    """
+    frames = traceback.extract_tb(exc.__traceback__)
+    for frame in reversed(frames):
+        try:
+            rel = Path(frame.filename).resolve().relative_to(repo_root.resolve())
+        except (ValueError, OSError):
+            continue
+        return str(rel).replace("\\", "/"), frame.lineno or 0
+
+    last = frames[-1] if frames else None
+    if last is None:
+        return "unknown", 0
+    return Path(last.filename).name, last.lineno or 0
 
 
 def _decision_link(record) -> Link | None:

@@ -9,7 +9,6 @@ from __future__ import annotations
 import collections
 import os
 import subprocess
-import traceback
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -19,7 +18,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import Status, StatusCode
 
 from codeautopsy.config import get_settings
-from codeautopsy.enricher.core import autopsy_exception
+from codeautopsy.enricher.core import autopsy_exception, locate_crash_frame
 from codeautopsy.otel import build_tracer_provider, force_utf8_stdout
 
 force_utf8_stdout()
@@ -101,14 +100,7 @@ def checkout(payload: dict) -> dict:
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))
 
-            frames = traceback.extract_tb(exc.__traceback__)
-            last = frames[-1] if frames else None
-            file_path = last.filename if last else __file__
-            lineno = (last.lineno or 0) if last else 0
-            try:
-                rel_path = str(Path(file_path).resolve().relative_to(REPO_ROOT)).replace("\\", "/")
-            except ValueError:
-                rel_path = Path(file_path).name
+            rel_path, lineno = locate_crash_frame(exc, REPO_ROOT)
 
             key = (rel_path, lineno)
             _crash_counts[key] += 1

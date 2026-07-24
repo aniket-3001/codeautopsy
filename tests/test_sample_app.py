@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+import codeautopsy.enricher.core as enricher_core
 import codeautopsy.sample_app.main as sample_main
 from codeautopsy.provenance.models import ResolveResponse
 
@@ -105,8 +106,8 @@ def test_deployed_commit_sha_falls_back_to_unknown_when_git_unavailable(monkeypa
 
 
 def test_checkout_crash_outside_repo_root_falls_back_to_filename(monkeypatch):
-    """When the crashing frame's file isn't under REPO_ROOT, relative_to() raises ValueError
-    and the handler falls back to just the bare filename instead of a repo-relative path.
+    """When no frame in the traceback is under REPO_ROOT, locate_crash_frame() falls back to
+    just the bare filename instead of a repo-relative path.
     """
 
     def fake_parse_discount(code: str) -> int:
@@ -122,7 +123,7 @@ def test_checkout_crash_outside_repo_root_falls_back_to_filename(monkeypatch):
 
     monkeypatch.setattr(sample_main, "autopsy_exception", fake_autopsy)
     monkeypatch.setattr(
-        sample_main.traceback,
+        enricher_core.traceback,
         "extract_tb",
         lambda tb: [type("Frame", (), {"filename": "/outside/repo/elsewhere.py", "lineno": 7})()],
     )

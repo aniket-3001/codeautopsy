@@ -13,10 +13,20 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+import codeautopsy.enricher.core as enricher_core
 from codeautopsy.config import Settings
-from codeautopsy.enricher.core import CAUSE_OF_DEATH_BY_EXC, autopsy_exception, resolve_decision
+from codeautopsy.enricher.core import (
+    CAUSE_OF_DEATH_BY_EXC,
+    autopsy_exception,
+    locate_crash_frame,
+    resolve_decision,
+)
 from codeautopsy.enricher.incidents import latest_incident_for, read_incidents, record_incident
 from codeautopsy.provenance.models import ProvenanceRecord, ResolveResponse
+
+
+def _fake_frame(filename: str, lineno: int):
+    return type("Frame", (), {"filename": filename, "lineno": lineno})()
 
 
 def _memory_provider() -> tuple[TracerProvider, InMemorySpanExporter]:
@@ -298,3 +308,77 @@ def test_resolve_decision_returns_unresolved_when_provenance_service_unreachable
 
     assert resp.resolved is False
     assert "provenance service unreachable" in resp.detail
+
+
+# --- locate_crash_frame (crash-site attribution) --------------------------------------------
+#
+# Regression coverage for a real bug found during field testing: when an exception is raised
+# from *inside* a library/stdlib call (e.g. datetime.strptime), the literal last traceback
+# frame lives in that library's file, not the app's own repo — so blaming it produces the
+# wrong file entirely instead of a clean "no decision recorded" result.
+
+
+def test_locate_crash_frame_selects_frame_inside_repo_root(tmp_path: Path, monkeypatch):
+    app_file = tmp_path / "app" / "parsing.py"
+    monkeypatch.setattr(
+        enricher_core.traceback, "extract_tb", lambda tb: [_fake_frame(str(app_file), 14)]
+    )
+
+    try:
+        raise ValueError("boom")
+    except ValueError as exc:
+        rel_path, lineno = locate_crash_frame(exc, tmp_path)
+
+    assert rel_path == "app/parsing.py"
+    assert lineno == 14
+
+
+def test_locate_crash_frame_prefers_app_frame_over_stdlib_frame(tmp_path: Path, monkeypatch):
+    """The bug found in the field: the app calls a stdlib function that raises. The last
+    traceback frame is the stdlib file, but the frame just before it — the app's own call
+    site — is what must be blamed.
+    """
+    app_file = tmp_path / "app" / "parsing.py"
+    stdlib_frame = _fake_frame("/usr/lib/python3.11/_strptime.py", 349)
+    app_frame = _fake_frame(str(app_file), 14)
+    monkeypatch.setattr(
+        enricher_core.traceback, "extract_tb", lambda tb: [app_frame, stdlib_frame]
+    )
+
+    try:
+        raise ValueError("time data does not match format")
+    except ValueError as exc:
+        rel_path, lineno = locate_crash_frame(exc, tmp_path)
+
+    assert rel_path == "app/parsing.py"
+    assert lineno == 14
+
+
+def test_locate_crash_frame_falls_back_to_bare_filename_when_no_frame_in_repo(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        enricher_core.traceback,
+        "extract_tb",
+        lambda tb: [_fake_frame("/outside/repo/elsewhere.py", 7)],
+    )
+
+    try:
+        raise ValueError("boom")
+    except ValueError as exc:
+        rel_path, lineno = locate_crash_frame(exc, tmp_path)
+
+    assert rel_path == "elsewhere.py"
+    assert lineno == 7
+
+
+def test_locate_crash_frame_returns_unknown_for_empty_traceback(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(enricher_core.traceback, "extract_tb", lambda tb: [])
+
+    try:
+        raise ValueError("boom")
+    except ValueError as exc:
+        rel_path, lineno = locate_crash_frame(exc, tmp_path)
+
+    assert rel_path == "unknown"
+    assert lineno == 0
