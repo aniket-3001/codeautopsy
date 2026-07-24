@@ -31,6 +31,12 @@ from codeautopsy.provenance.models import (
     ResolveResponse,
 )
 from codeautopsy.provenance.store import ProvenanceStore, ProvenanceStoreProtocol
+from codeautopsy.reliability.core import compute_leaderboard, score_snippet
+from codeautopsy.reliability.models import (
+    LeaderboardReport,
+    RiskGateRequest,
+    RiskGateResponse,
+)
 
 # Public demo: the sandbox page (GitHub Pages) calls this service directly from the browser.
 DEMO_ORIGINS = [
@@ -196,6 +202,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "resolved_incident_count": sum(1 for i in incidents if i.resolved),
             "incidents": incidents,
         }
+
+    @app.get("/v1/leaderboard", response_model=LeaderboardReport)
+    def v1_leaderboard(ctx=Depends(require_user)) -> LeaderboardReport:
+        # The aggregate lens: rank every AI tool/model this org has recorded by real
+        # production crash rate. Pure read over the same provenance + incidents tables.
+        return compute_leaderboard(store, org_id=ctx.org_id)
+
+    @app.post("/v1/risk-gate", response_model=RiskGateResponse)
+    def v1_risk_gate(req: RiskGateRequest, ctx=Depends(require_user)) -> RiskGateResponse:
+        # Prognosis without a git repo: score a pasted snippet against this org's history.
+        return score_snippet(store, req.code, req.reasoning, org_id=ctx.org_id)
 
     @app.delete("/v1/provenance/{decision_id}")
     def v1_delete(decision_id: str, ctx=Depends(require_user)) -> dict:

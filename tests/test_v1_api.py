@@ -322,6 +322,86 @@ def test_two_orgs_cannot_see_each_others_data(tmp_path: Path):
     assert dash_b_final["decision_count"] == 1  # spoofed record did NOT land in org B
 
 
+# --- reliability: leaderboard + risk gate -----------------------------------------------
+
+
+def test_leaderboard_requires_auth_and_ranks_the_orgs_own_data(tmp_path: Path):
+    client = _client(tmp_path)
+    token = _signup(client, "dev@example.com")["access_token"]
+    api_key = client.post("/v1/keys", headers=_auth_headers(token)).json()["key"]
+
+    # One risky decision that crashes, one clean decision that doesn't.
+    client.post(
+        "/v1/provenance",
+        json=_record_payload(decision_id="risky", tool="claude-code", model="opus"),
+        headers={"X-Api-Key": api_key},
+    )
+    client.post(
+        "/v1/provenance",
+        json=_record_payload(
+            decision_id="clean", tool="claude-code", model="opus", risk_flags=[]
+        ),
+        headers={"X-Api-Key": api_key},
+    )
+    client.post(
+        "/v1/resolve",
+        json={"commit_sha": "abc123", "file_path": "app/payment.py", "line": 42},
+        headers={"X-Api-Key": api_key},
+    )
+
+    assert client.get("/v1/leaderboard").status_code == 401
+
+    board = client.get("/v1/leaderboard", headers=_auth_headers(token)).json()
+    assert board["total_decisions"] == 2
+    assert board["total_incidents"] == 1
+    row = board["scores"][0]
+    assert row["tool"] == "claude-code"
+    assert row["model"] == "opus"
+    assert row["decisions"] == 2
+    assert row["crashed_decisions"] == 1
+    assert row["crash_rate"] == 0.5
+
+
+def test_risk_gate_prices_a_snippet_against_the_orgs_history(tmp_path: Path):
+    client = _client(tmp_path)
+    token = _signup(client, "dev@example.com")["access_token"]
+    api_key = client.post("/v1/keys", headers=_auth_headers(token)).json()["key"]
+
+    # Build a track record: 2 decisions carry assumed_valid_input, 1 crashed -> 50%.
+    for did in ("h1", "h2"):
+        client.post(
+            "/v1/provenance", json=_record_payload(decision_id=did), headers={"X-Api-Key": api_key}
+        )
+    client.post(
+        "/v1/resolve",
+        json={"commit_sha": "abc123", "file_path": "app/payment.py", "line": 42},
+        headers={"X-Api-Key": api_key},
+    )
+
+    assert client.post("/v1/risk-gate", json={"code": "x = 1"}).status_code == 401
+
+    r = client.post(
+        "/v1/risk-gate",
+        json={"code": "# assume the payload is always valid\nx = int(code)"},
+        headers=_auth_headers(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["verdict"] == "priced"
+    assert body["worst_flag"] == "assumed_valid_input"
+    assert body["crash_rate"] == 0.5
+
+
+def test_risk_gate_clear_snippet(tmp_path: Path):
+    client = _client(tmp_path)
+    token = _signup(client, "dev@example.com")["access_token"]
+    r = client.post(
+        "/v1/risk-gate", json={"code": "def add(a, b):\n    return a + b"},
+        headers=_auth_headers(token),
+    )
+    assert r.json()["verdict"] == "clear"
+
+
 def test_legacy_public_endpoints_still_work_unauthenticated(tmp_path: Path):
     """The scripted sandbox demo (docs/demo.html) has no auth and must be unaffected."""
     client = _client(tmp_path)
