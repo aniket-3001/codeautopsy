@@ -1,0 +1,371 @@
+{
+  "title": "CodeAutopsy — Blast Radius",
+  "description": "Crash forensics for AI-authored code: what broke, how bad, and whether the Fix Bot closed the loop. Filters only on span name codeautopsy.autopsy, so it works across any CodeAutopsy-instrumented service.",
+  "tags": ["codeautopsy", "hackathon"],
+  "layout": [
+    { "h": 1, "i": "row-overview", "moved": false, "static": false, "w": 12, "x": 0, "y": 0 },
+    { "h": 3, "i": "total-crashes", "moved": false, "static": false, "w": 3, "x": 0, "y": 1 },
+    { "h": 3, "i": "unresolved-crashes", "moved": false, "static": false, "w": 3, "x": 3, "y": 1 },
+    { "h": 3, "i": "total-blast-radius", "moved": false, "static": false, "w": 3, "x": 6, "y": 1 },
+    { "h": 3, "i": "resolution-rate", "moved": false, "static": false, "w": 3, "x": 9, "y": 1 },
+    { "h": 1, "i": "row-time", "moved": false, "static": false, "w": 12, "x": 0, "y": 4 },
+    { "h": 6, "i": "blast-radius-over-time", "moved": false, "static": false, "w": 6, "x": 0, "y": 5 },
+    { "h": 6, "i": "resolved-vs-unresolved-time", "moved": false, "static": false, "w": 6, "x": 6, "y": 5 },
+    { "h": 1, "i": "row-leaderboard", "moved": false, "static": false, "w": 12, "x": 0, "y": 11 },
+    { "h": 6, "i": "crashes-by-file", "moved": false, "static": false, "w": 6, "x": 0, "y": 12 },
+    { "h": 6, "i": "crashes-by-risk-flag", "moved": false, "static": false, "w": 6, "x": 6, "y": 12 },
+    { "h": 1, "i": "row-queue", "moved": false, "static": false, "w": 12, "x": 0, "y": 18 },
+    { "h": 8, "i": "unresolved-crash-queue", "moved": false, "static": false, "w": 12, "x": 0, "y": 19 }
+  ],
+  "panelMap": {
+    "row-overview": {
+      "collapsed": false,
+      "widgets": [
+        { "h": 3, "i": "total-crashes", "moved": false, "static": false, "w": 3, "x": 0, "y": 1 },
+        { "h": 3, "i": "unresolved-crashes", "moved": false, "static": false, "w": 3, "x": 3, "y": 1 },
+        { "h": 3, "i": "total-blast-radius", "moved": false, "static": false, "w": 3, "x": 6, "y": 1 },
+        { "h": 3, "i": "resolution-rate", "moved": false, "static": false, "w": 3, "x": 9, "y": 1 }
+      ]
+    },
+    "row-time": {
+      "collapsed": false,
+      "widgets": [
+        { "h": 6, "i": "blast-radius-over-time", "moved": false, "static": false, "w": 6, "x": 0, "y": 5 },
+        { "h": 6, "i": "resolved-vs-unresolved-time", "moved": false, "static": false, "w": 6, "x": 6, "y": 5 }
+      ]
+    },
+    "row-leaderboard": {
+      "collapsed": false,
+      "widgets": [
+        { "h": 6, "i": "crashes-by-file", "moved": false, "static": false, "w": 6, "x": 0, "y": 12 },
+        { "h": 6, "i": "crashes-by-risk-flag", "moved": false, "static": false, "w": 6, "x": 6, "y": 12 }
+      ]
+    },
+    "row-queue": {
+      "collapsed": false,
+      "widgets": [
+        { "h": 8, "i": "unresolved-crash-queue", "moved": false, "static": false, "w": 12, "x": 0, "y": 19 }
+      ]
+    }
+  },
+  "variables": {},
+  "widgets": [
+    { "id": "row-overview", "panelTypes": "row", "query": {}, "title": "Blast Radius Overview" },
+
+    {
+      "id": "total-crashes",
+      "panelTypes": "value",
+      "title": "Total Crashes Autopsied",
+      "description": "Every crash CodeAutopsy has traced back to an AI decision",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "Crashes",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "count()" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy'" },
+              "groupBy": [],
+              "having": { "expression": "" },
+              "limit": null,
+              "orderBy": [],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    },
+
+    {
+      "id": "unresolved-crashes",
+      "panelTypes": "value",
+      "title": "Unresolved Crashes",
+      "description": "Crashes with no matching decision resolved yet — nothing for Fix Bot to act on",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "Unresolved",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "count()" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy' AND codeautopsy.resolved = false" },
+              "groupBy": [],
+              "having": { "expression": "" },
+              "limit": null,
+              "orderBy": [],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    },
+
+    {
+      "id": "total-blast-radius",
+      "panelTypes": "value",
+      "title": "Total Blast Radius",
+      "description": "Sum of downstream impact across every crash",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "Blast Radius",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "sum(codeautopsy.blast_radius)" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy'" },
+              "groupBy": [],
+              "having": { "expression": "" },
+              "limit": null,
+              "orderBy": [],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    },
+
+    {
+      "id": "resolution-rate",
+      "panelTypes": "value",
+      "title": "Resolution Rate %",
+      "description": "Share of crashes Fix Bot has resolved",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "Resolved",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "count()" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy' AND codeautopsy.resolved = true" },
+              "groupBy": [],
+              "having": { "expression": "" },
+              "limit": null,
+              "orderBy": [],
+              "functions": []
+            },
+            {
+              "dataSource": "traces",
+              "queryName": "B",
+              "expression": "B",
+              "disabled": false,
+              "legend": "Total",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "count()" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy'" },
+              "groupBy": [],
+              "having": { "expression": "" },
+              "limit": null,
+              "orderBy": [],
+              "functions": []
+            }
+          ],
+          "queryFormulas": [
+            { "disabled": false, "expression": "(A/B)*100", "legend": "Resolution Rate %", "queryName": "F1" }
+          ]
+        }
+      }
+    },
+
+    { "id": "row-time", "panelTypes": "row", "query": {}, "title": "Blast Radius Over Time" },
+
+    {
+      "id": "blast-radius-over-time",
+      "panelTypes": "graph",
+      "title": "Blast Radius Over Time",
+      "description": "Sum of blast radius per crash, over time",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "Blast Radius",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "sum(codeautopsy.blast_radius)" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy'" },
+              "groupBy": [],
+              "having": { "expression": "" },
+              "limit": null,
+              "orderBy": [],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    },
+
+    {
+      "id": "resolved-vs-unresolved-time",
+      "panelTypes": "graph",
+      "title": "Resolved vs Unresolved Crashes",
+      "description": "Crash count split by resolution status, over time",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "{{codeautopsy.resolved}}",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "count()" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy'" },
+              "groupBy": [
+                { "dataType": "bool", "id": "codeautopsy.resolved--bool--tag--false", "isColumn": false, "isJSON": false, "key": "codeautopsy.resolved", "type": "tag" }
+              ],
+              "having": { "expression": "" },
+              "limit": null,
+              "orderBy": [],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    },
+
+    { "id": "row-leaderboard", "panelTypes": "row", "query": {}, "title": "Risk Leaderboard" },
+
+    {
+      "id": "crashes-by-file",
+      "panelTypes": "table",
+      "title": "Crashes by File",
+      "description": "Which files are crashing the most, worst first",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "count()" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy'" },
+              "groupBy": [
+                { "dataType": "string", "id": "code.filepath--string--tag--false", "isColumn": false, "isJSON": false, "key": "code.filepath", "type": "tag" }
+              ],
+              "having": { "expression": "" },
+              "limit": 10,
+              "orderBy": [ { "columnName": "count()", "order": "desc" } ],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    },
+
+    {
+      "id": "crashes-by-risk-flag",
+      "panelTypes": "table",
+      "title": "Crashes by Risk Flag",
+      "description": "Which write-time risk flags correlate most with production crashes",
+      "timePreferance": "GLOBAL_TIME",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "",
+              "stepInterval": 60,
+              "aggregations": [ { "expression": "count()" } ],
+              "filter": { "expression": "name = 'codeautopsy.autopsy' AND codeautopsy.risk_flags EXISTS AND codeautopsy.risk_flags != ''" },
+              "groupBy": [
+                { "dataType": "string", "id": "codeautopsy.risk_flags--string--tag--false", "isColumn": false, "isJSON": false, "key": "codeautopsy.risk_flags", "type": "tag" }
+              ],
+              "having": { "expression": "" },
+              "limit": 10,
+              "orderBy": [ { "columnName": "count()", "order": "desc" } ],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    },
+
+    { "id": "row-queue", "panelTypes": "row", "query": {}, "title": "Unresolved Crash Queue" },
+
+    {
+      "id": "unresolved-crash-queue",
+      "panelTypes": "list",
+      "title": "Unresolved Crash Queue",
+      "description": "Newest unresolved crashes, ready for Fix Bot",
+      "timePreferance": "GLOBAL_TIME",
+      "selectedTracesFields": [
+        { "dataType": "string", "id": "timestamp--string--tag--true", "isColumn": true, "isJSON": false, "key": "timestamp", "type": "tag" },
+        { "dataType": "string", "id": "serviceName--string--tag--true", "isColumn": true, "isJSON": false, "key": "serviceName", "type": "tag" },
+        { "dataType": "string", "id": "code.filepath--string--tag--false", "isColumn": false, "isJSON": false, "key": "code.filepath", "type": "tag" },
+        { "dataType": "float64", "id": "code.lineno--float64--tag--false", "isColumn": false, "isJSON": false, "key": "code.lineno", "type": "tag" },
+        { "dataType": "string", "id": "codeautopsy.cause_of_death--string--tag--false", "isColumn": false, "isJSON": false, "key": "codeautopsy.cause_of_death", "type": "tag" },
+        { "dataType": "string", "id": "deployment.commit.sha--string--tag--false", "isColumn": false, "isJSON": false, "key": "deployment.commit.sha", "type": "tag" }
+      ],
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "traces",
+              "queryName": "A",
+              "expression": "A",
+              "disabled": false,
+              "legend": "",
+              "stepInterval": 60,
+              "filter": { "expression": "name = 'codeautopsy.autopsy' AND codeautopsy.resolved = false" },
+              "groupBy": [],
+              "having": { "expression": "" },
+              "limit": null,
+              "pageSize": 20,
+              "orderBy": [ { "columnName": "timestamp", "order": "desc" } ],
+              "functions": []
+            }
+          ],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}
