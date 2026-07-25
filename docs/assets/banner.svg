@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="CodeAutopsy — a production crash traces back across a glowing span link to the AI decision that authored it">
+  <title>CodeAutopsy — git blame for the AI era</title>
+  <desc>An abstract hero: a runtime service crashes on the right; a glowing animated span link jumps back across a dashed boundary to the AI decision span that wrote the crashing line, on the left.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#05070f"/>
+      <stop offset="1" stop-color="#0a0f22"/>
+    </linearGradient>
+    <linearGradient id="linkGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <radialGradient id="devGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6366f1" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="crashGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f43f5e" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#f43f5e" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.4" fill="#8b93ff" opacity="0.09"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softglow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <clipPath id="round"><rect x="0" y="0" width="1200" height="320" rx="24"/></clipPath>
+    <style>
+      .commit   { animation: pulse 3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      .c2 { animation-delay: .4s } .c3 { animation-delay: .8s }
+      @keyframes pulse { 0%,100% { opacity: .55; transform: scale(.92) } 50% { opacity: 1; transform: scale(1.08) } }
+      .gitline { stroke-dasharray: 4 6; animation: crawl 2.4s linear infinite; }
+      @keyframes crawl { to { stroke-dashoffset: -20; } }
+
+      .bubble { animation: float 3.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+      .crashbox { animation: shake 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      @keyframes shake { 0%,92%,100% { transform: translateX(0); } 93% { transform: translateX(-2px); } 95% { transform: translateX(2px); } 97% { transform: translateX(-1.5px); } 99% { transform: translateX(1.5px); } }
+      .ring { animation: ripple 2.4s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+      .ring2 { animation-delay: .8s }
+      @keyframes ripple { 0% { opacity: 0; transform: scale(.5); } 45% { opacity: .75; transform: scale(1); } 100% { opacity: 0; transform: scale(1.5); } }
+      .spark { animation: flicker 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      @keyframes flicker { 0%,88%,100% { opacity: 0; } 90% { opacity: 1; } 94% { opacity: .4; } 96% { opacity: 1; } }
+
+      .link { stroke-dasharray: 6 10; animation: flow 1.6s linear infinite; }
+      @keyframes flow { to { stroke-dashoffset: -32; } }
+      /* Pure CSS transform, deliberately not SMIL animateMotion: SVGs embedded as an image
+         (how this banner is used in the README) run CSS animations but not SMIL, so a
+         motion-path approach would silently sit still for every reader. Three translate
+         keyframes approximate the arc instead. */
+      .packet { animation: jump 3.2s cubic-bezier(.4,0,.2,1) infinite; }
+      @keyframes jump {
+        0%   { transform: translate(0,0); opacity: 0; }
+        8%   { opacity: 1; }
+        50%  { transform: translate(-339px,-112px); opacity: 1; }
+        92%  { transform: translate(-678px,0); opacity: 1; }
+        100% { transform: translate(-678px,0); opacity: 0; }
+      }
+      .divider { stroke-dasharray: 3 7; }
+      .mark { animation: markpulse 2.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      @keyframes markpulse { 0%,100% { opacity: .7; } 50% { opacity: 1; } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .commit,.gitline,.bubble,.crashbox,.ring,.spark,.link,.packet,.mark { animation: none; }
+        .ring,.ring2 { opacity: .35; }
+        .packet { opacity: 0; }
+      }
+    </style>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <rect x="0" y="0" width="1200" height="320" fill="url(#bg)"/>
+    <rect x="0" y="0" width="1200" height="320" fill="url(#dots)"/>
+
+    <!-- boundary between dev-time (left) and runtime (right) -->
+    <line class="divider" x1="600" y1="30" x2="600" y2="290" stroke="#3b4270" stroke-width="1.5"/>
+
+    <!-- DEV-TIME: the AI decision span, left side -->
+    <g transform="translate(255,160)">
+      <circle r="92" fill="url(#devGlow)"/>
+
+      <!-- a small git-commit chain leading up to the decision -->
+      <g stroke="#818cf8" stroke-width="1.4" opacity="0.7">
+        <path class="gitline" d="M-150,40 L-95,18"/>
+        <path class="gitline" d="M-95,18 L-40,32"/>
+        <path class="gitline" d="M-40,32 L0,0"/>
+      </g>
+      <g fill="#a5b4fc" filter="url(#glow)">
+        <circle class="commit c1" cx="-150" cy="40" r="4.5"/>
+        <circle class="commit c2" cx="-95" cy="18" r="4.5"/>
+        <circle class="commit c3" cx="-40" cy="32" r="4.5"/>
+      </g>
+
+      <!-- the decision itself: a reasoning bubble the agent wrote -->
+      <g class="bubble" filter="url(#glow)">
+        <path d="M-46,-34 h92 a14,14 0 0 1 14,14 v34 a14,14 0 0 1 -14,14 h-58 l-20,18 v-18 h-14 a14,14 0 0 1 -14,-14 v-34 a14,14 0 0 1 14,-14 Z"
+              fill="#0e1330" stroke="url(#linkGrad)" stroke-width="2"/>
+        <rect x="-30" y="-14" width="70" height="4.5" rx="2.25" fill="#c7d2fe" opacity="0.85"/>
+        <rect x="-30" y="-1" width="94" height="4.5" rx="2.25" fill="#c7d2fe" opacity="0.65"/>
+        <rect x="-30" y="12" width="50" height="4.5" rx="2.25" fill="#c7d2fe" opacity="0.45"/>
+      </g>
+      <circle cx="0" cy="0" r="6" fill="#22d3ee" filter="url(#glow)"/>
+    </g>
+
+    <!-- RUNTIME: the crash, right side -->
+    <g transform="translate(945,160)">
+      <circle r="92" fill="url(#crashGlow)"/>
+      <circle class="ring" r="58" fill="none" stroke="#fb7185" stroke-width="2"/>
+      <circle class="ring ring2" r="58" fill="none" stroke="#fb7185" stroke-width="2"/>
+
+      <g class="crashbox">
+        <rect x="-58" y="-40" width="116" height="80" rx="12" fill="#12162a" stroke="#fb7185" stroke-width="2"/>
+        <rect x="-42" y="-24" width="84" height="7" rx="3.5" fill="#f3f4f6" opacity="0.25"/>
+        <rect x="-42" y="-8" width="60" height="7" rx="3.5" fill="#f3f4f6" opacity="0.25"/>
+        <rect x="-42" y="8" width="70" height="7" rx="3.5" fill="#fda4af" opacity="0.8"/>
+        <path class="spark" d="M18,-46 L28,-30 L18,-24 L30,-6" fill="none" stroke="#fde68a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+      </g>
+      <circle cx="0" cy="0" r="6" fill="#f43f5e" filter="url(#glow)"/>
+    </g>
+
+    <!-- THE JUMP: the span link, arcing from the crash back to the decision -->
+    <path d="M939,140 C 820,20 380,20 261,140" fill="none" stroke="url(#linkGrad)" stroke-width="2.5" class="link" filter="url(#glow)"/>
+    <g transform="translate(939,140)">
+      <circle class="packet" r="5" fill="#eafff7" filter="url(#glow)"/>
+    </g>
+
+    <!-- small autopsy mark hovering over the arc's midpoint -->
+    <g class="mark" transform="translate(600,54)" filter="url(#glow)">
+      <circle r="13" fill="none" stroke="#eafff7" stroke-width="2.5"/>
+      <line x1="9.2" y1="9.2" x2="19" y2="19" stroke="#eafff7" stroke-width="3" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>
