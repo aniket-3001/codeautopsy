@@ -283,3 +283,33 @@ def test_server_registers_three_tools() -> None:
     # FastMCP exposes registered tools asynchronously; the manager holds them synchronously.
     names = set(server._tool_manager._tools.keys())  # noqa: SLF001
     assert {"autopsy", "prognose", "leaderboard"} <= names
+
+
+@pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")
+def test_server_tool_wrappers_call_through_to_core(
+    store: ProvenanceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wrapper functions `build_server()` registers take no store/settings — they let
+    `core.autopsy`/`prognose`/`leaderboard` default to `make_store(get_settings())`. Patch
+    those two so the call stays on the test's temp store instead of the real provenance.db.
+    """
+    from codeautopsy.mcp.server import build_server
+
+    store.add(_record())
+    monkeypatch.setattr(core, "get_settings", _settings)
+    monkeypatch.setattr(core, "make_store", lambda settings: store)
+
+    server = build_server()
+    tools = server._tool_manager._tools  # noqa: SLF001
+
+    autopsy_out = tools["autopsy"].fn(
+        commit_sha="abc123def456", file_path="app/payment.py", line=42, repo=None
+    )
+    assert autopsy_out["resolved"] is True
+    assert autopsy_out["decision_id"] == "dec_abc"
+
+    prognose_out = tools["prognose"].fn(code="discount = int(request.args['code'])")
+    assert prognose_out["verdict"] in {"priced", "flagged", "clear"}
+
+    leaderboard_out = tools["leaderboard"].fn()
+    assert leaderboard_out["total_decisions"] == 1

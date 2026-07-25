@@ -300,3 +300,241 @@ def test_status(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "CodeAutopsy status" in result.stdout
     assert "0" in result.stdout
+
+
+def test_parse_lines_single_value():
+    assert cli_main._parse_lines("42") == (42, 42)
+
+
+def test_parse_lines_range():
+    assert cli_main._parse_lines("40-46") == (40, 46)
+
+
+def test_parse_lines_swaps_reversed_range():
+    assert cli_main._parse_lines("46-40") == (40, 46)
+
+
+def test_autopsy_resolved_with_confidence(monkeypatch):
+    payload = _resolved_json()
+    payload["confidence"] = 0.92
+    payload["confidence_factors"] = {"label": "high", "match": "exact-commit"}
+    monkeypatch.setattr(cli_main.httpx, "post", lambda *a, **kw: _FakeResponse(payload))
+    result = runner.invoke(cli_main.app, ["autopsy", "abc123def456", "app/payment.py", "42"])
+    assert result.exit_code == 0
+    assert "confidence:" in result.stdout
+    assert "92%" in result.stdout
+
+
+def test_provenance_found(monkeypatch, tmp_path):
+    trailers = {
+        "decision_id": "dec_7f3a",
+        "coordinate": "app/payment.py:42@abc123def456",
+        "traceparent": "00-7b5b1b39741a991f073d59e245fb7575-00f067aa0ba902b7-01",
+        "trace_id": "7b5b1b39741a991f073d59e245fb7575",
+        "span_id": "00f067aa0ba902b7",
+    }
+    monkeypatch.setattr(
+        "codeautopsy.provenance.trailers.read_commit_trailers", lambda repo, commit: trailers
+    )
+    result = runner.invoke(
+        cli_main.app, ["provenance", "abc123def456", "--repo", str(tmp_path)]
+    )
+    assert result.exit_code == 0
+    assert "dec_7f3a" in result.stdout
+    assert "app/payment.py:42@abc123def456" in result.stdout
+
+
+def test_provenance_not_found(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "codeautopsy.provenance.trailers.read_commit_trailers", lambda repo, commit: {}
+    )
+    result = runner.invoke(cli_main.app, ["provenance", "deadbeef", "--repo", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "No CodeAutopsy provenance trailers" in result.stdout
+
+
+def test_lessons_empty(monkeypatch):
+    class _EmptyStore:
+        def list_lessons(self, org_id):
+            return []
+
+    monkeypatch.setattr("codeautopsy.provenance.store.make_store", lambda settings: _EmptyStore())
+    result = runner.invoke(cli_main.app, ["lessons"])
+    assert result.exit_code == 0
+    assert "No lessons learned yet" in result.stdout
+
+
+def test_lessons_lists_learned(monkeypatch):
+    from codeautopsy.provenance.models import LessonRecord
+
+    learned = [
+        LessonRecord(
+            fingerprint="fp1",
+            lesson="Validate before int().",
+            times_seen=3,
+            cause_of_death="invalid value — unvalidated input",
+            patch_summary="try/except",
+        )
+    ]
+
+    class _Store:
+        def list_lessons(self, org_id):
+            return learned
+
+    monkeypatch.setattr("codeautopsy.provenance.store.make_store", lambda settings: _Store())
+    result = runner.invoke(cli_main.app, ["lessons"])
+    assert result.exit_code == 0
+    assert "Validate before int()." in result.stdout
+    assert "3" in result.stdout
+
+
+def test_recall_hit(monkeypatch):
+    from codeautopsy.fixbot.models import Genealogy
+    from codeautopsy.provenance.models import LessonRecord
+
+    genealogy = Genealogy(
+        file_path="app/payment.py", line=42, commit_sha="abc123def456", file_content="int(x)\n",
+        cause_of_death="invalid value — unvalidated input", risk_flags=["assumed_valid_input"],
+    )
+    hit = LessonRecord(
+        fingerprint="fp1", lesson="Validate before int().", times_seen=2, patch_summary="try/except"
+    )
+    monkeypatch.setattr("codeautopsy.fixbot.core.build_genealogy", lambda *a, **k: genealogy)
+    monkeypatch.setattr("codeautopsy.fixbot.lessons.recall_lesson", lambda *a, **k: hit)
+    monkeypatch.setattr("codeautopsy.provenance.store.make_store", lambda settings: object())
+
+    result = runner.invoke(cli_main.app, ["recall", "abc123def456", "app/payment.py", "42"])
+
+    assert result.exit_code == 0
+    assert "Validate before int()." in result.stdout
+    assert "replayed from memory" in result.stdout
+
+
+def test_recall_no_lesson(monkeypatch):
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(
+        file_path="app/other.py", line=9, commit_sha="deadbeef", file_content="x = 1\n"
+    )
+    monkeypatch.setattr("codeautopsy.fixbot.core.build_genealogy", lambda *a, **k: genealogy)
+    monkeypatch.setattr("codeautopsy.fixbot.lessons.recall_lesson", lambda *a, **k: None)
+    monkeypatch.setattr("codeautopsy.provenance.store.make_store", lambda settings: object())
+
+    result = runner.invoke(cli_main.app, ["recall", "deadbeef", "app/other.py", "9"])
+
+    assert result.exit_code == 1
+    assert "No lesson in memory" in result.stdout
+
+
+def test_fix_verified_with_prior_lesson(monkeypatch):
+    fake_result = FixBotResult(
+        verified=True,
+        explanation="Guard int(code) with a try/except and default to 0.",
+        lesson="Never trust an external discount code to be numeric.",
+        branch="codeautopsy/fix-dec_7f3a",
+        commit_sha="deadbeefcafe",
+        prior_lesson="Always validate external input before int().",
+        times_seen=3,
+    )
+    monkeypatch.setattr(cli_main, "run_fixbot", lambda *a, **kw: fake_result)
+    result = runner.invoke(cli_main.app, ["fix", "abc123", "app/payment.py", "42"])
+    assert result.exit_code == 0
+    assert "recalled from memory" in result.stdout
+    assert "seen 3x" in result.stdout
+
+
+def test_fix_json_verified(monkeypatch):
+    fake_result = FixBotResult(verified=True, branch="codeautopsy/fix-dec_7f3a", commit_sha="deadbeef")
+    monkeypatch.setattr(cli_main, "run_fixbot", lambda *a, **kw: fake_result)
+    result = runner.invoke(cli_main.app, ["fix", "abc123", "app/payment.py", "42", "--json"])
+    assert result.exit_code == 0
+    assert '"verified":true' in result.stdout.replace(" ", "")
+
+
+def test_fix_json_bot_error(monkeypatch):
+    def fake_run_fixbot(*a, **kw):
+        raise FixBotError("working tree is not clean")
+
+    monkeypatch.setattr(cli_main, "run_fixbot", fake_run_fixbot)
+    result = runner.invoke(cli_main.app, ["fix", "abc123", "app/payment.py", "42", "--json"])
+    assert result.exit_code == 2
+    assert '"verified":false' in result.stdout.replace(" ", "")
+    assert "working tree is not clean" in result.stdout
+
+
+def test_prognose_comment_could_not_post(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+    from codeautopsy.prognosis.models import PrognosisReport
+
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli_main,
+        "scan",
+        lambda *a, **kw: PrognosisReport(base_ref="main", head_ref="HEAD", lines_scanned=1),
+    )
+    monkeypatch.setattr(cli_main, "post_comment", lambda *a, **kw: None)
+    result = runner.invoke(
+        cli_main.app, ["prognose", "main", "--repo", str(tmp_path), "--comment"]
+    )
+    assert result.exit_code == 0
+    assert "Could not post to PR" in result.stdout
+
+
+def test_record_local(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "record",
+            "--commit", "abc123def456",
+            "--file", "app/checkout.py",
+            "--lines", "40-46",
+            "--reasoning", "trusting the discount code is numeric",
+            "--risk-flag", "assumed_valid_input",
+            "--tool", "claude-code",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Recorded" in result.stdout
+    assert "(local" in result.stdout
+
+
+def test_record_hosted(monkeypatch):
+    monkeypatch.setattr(
+        cli_main.httpx, "post", lambda *a, **kw: _FakeResponse({"records": 5})
+    )
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "record",
+            "--commit", "abc123def456",
+            "--file", "app/checkout.py",
+            "--lines", "42",
+            "--api-key", "ca_live_test",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "(hosted, 5 total)" in result.stdout
+
+
+def test_record_hosted_failure(monkeypatch):
+    def fake_post(*a, **kw):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(cli_main.httpx, "post", fake_post)
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "record",
+            "--commit", "abc123def456",
+            "--file", "app/checkout.py",
+            "--lines", "42",
+            "--api-key", "ca_live_test",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "Failed to record to hosted service" in result.stdout
