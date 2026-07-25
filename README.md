@@ -86,7 +86,7 @@ that caused it."
 [sample app](https://codeautopsy-sample-app-182653908302.us-central1.run.app/health) ·
 [provenance API](https://codeautopsy-provenance-182653908302.us-central1.run.app/health)
 
-> **Judges — SigNoz proof without a login:** the web app shows captured screenshots of the real
+> **Judges — no SigNoz login needed:** the web app shows captured screenshots of the real
 > trace + blast-radius dashboard in-app (SigNoz Cloud has no anonymous sharing). Want *live*
 > access to the SigNoz workspace? Email
 > [aniket22073@iiitd.ac.in](mailto:aniket22073@iiitd.ac.in?subject=CodeAutopsy%20%E2%80%94%20SigNoz%20viewer%20access)
@@ -160,11 +160,10 @@ Every service exports to a **real, hosted SigNoz Cloud tenant** (`in2` region), 
 ephemeral container spun up for the demo — the telemetry above is what's actually live in
 production right now.
 
-### SigNoz proof, in-app
+### SigNoz, in-app
 
 SigNoz Cloud doesn't support anonymous sharing. Instead of sending judges to a login wall,
-the dashboard's SigNoz proof modal shows these two **real, already-captured** screenshots
-directly in the app:
+the dashboard shows these two **real, already-captured** screenshots directly in the app:
 
 <table>
 <tr>

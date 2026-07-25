@@ -1,4 +1,4 @@
-# Assets — banner, in-app SigNoz proof, and README screenshot placeholders
+# Assets — banner, in-app SigNoz screenshots, and README screenshot placeholders
 
 ## `banner.svg`
 
@@ -7,11 +7,11 @@ The animated hero banner at the top of the root `README.md`. Hand-authored SVG u
 CSS animations but not SMIL `animateMotion`, so everything here is a pure CSS transform).
 Edit directly in a text editor; there's no build step.
 
-## In-app SigNoz proof screenshots — `signoz-trace.png`, `signoz-blast-radius.png`
+## In-app SigNoz screenshots — `signoz-trace.png`, `signoz-blast-radius.png`
 
 SigNoz Cloud has no anonymous sharing, so the live deep-links dead-end judges at a login wall.
-The web UI (`docs/app.html`) shows these captured screenshots **in-app** — zero login — via the
-SigNoz proof modal, and keeps the live link as a clearly-labelled "login required" button. The
+The web UI (`docs/app.html`) shows these captured screenshots **in-app** — zero login — via a
+modal, and keeps the live link as a clearly-labelled "login required" button. The
 root README also embeds them directly (real, already-captured — not placeholders).
 
 Drop exactly these two PNG files here (names are hard-coded in `app.html`):
