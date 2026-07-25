@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import codeautopsy.provenance.service as service_module
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.provenance.service import create_app, run
 
@@ -54,6 +55,16 @@ def test_add_and_list(tmp_path: Path):
     assert r.json()[0]["decision_id"] == "dec_7f3a"
 
 
+def test_add_emits_decisions_indexed_metric(tmp_path: Path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        service_module.decisions_indexed_counter, "add", lambda n, attrs=None: calls.append((n, attrs))
+    )
+    client = _client(tmp_path)
+    client.post("/provenance", json=_record_payload())
+    assert calls == [(1, {"endpoint": "public"})]
+
+
 def test_add_bulk(tmp_path: Path):
     client = _client(tmp_path)
     payload = [_record_payload(decision_id="dec_1"), _record_payload(decision_id="dec_2")]
@@ -94,6 +105,23 @@ def test_resolve_fast_path_over_http(tmp_path: Path):
     assert body["resolved"] is True
     assert body["introducing_commit"] == "abc123"
     assert body["record"]["decision_id"] == "dec_7f3a"
+
+
+def test_resolve_emits_incidents_metric_tagged_by_outcome(tmp_path: Path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        service_module.incidents_counter, "add", lambda n, attrs=None: calls.append((n, attrs))
+    )
+    client = _client(tmp_path)
+    client.post("/provenance", json=_record_payload())
+
+    client.post("/resolve", json={"commit_sha": "abc123", "file_path": "app/payment.py", "line": 42})
+    client.post("/resolve", json={"commit_sha": "nope", "file_path": "app/payment.py", "line": 1})
+
+    assert calls == [
+        (1, {"endpoint": "public", "resolved": True}),
+        (1, {"endpoint": "public", "resolved": False}),
+    ]
 
 
 def test_resolve_unresolved_when_no_match(tmp_path: Path):

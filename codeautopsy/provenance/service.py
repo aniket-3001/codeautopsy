@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import metrics, trace
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from codeautopsy.accounts.auth import make_require_api_key, make_require_user
 from codeautopsy.accounts.models import (
@@ -36,6 +38,7 @@ from codeautopsy.autoheal.models import (
     HealWebhookRequest,
 )
 from codeautopsy.config import Settings, get_settings
+from codeautopsy.otel import build_meter_provider, build_tracer_provider
 from codeautopsy.provenance.indexer import resolve as resolve_provenance
 from codeautopsy.provenance.models import (
     IncidentRecord,
@@ -57,6 +60,26 @@ DEMO_ORIGINS = [
     "http://localhost:8080",
     "http://127.0.0.1:8080",
 ]
+
+# Module-level, set exactly once at import time (mirroring sample_app/main.py) — NOT inside
+# create_app(), which tests call dozens of times: the OTel API only honors the *first* call
+# to set_tracer_provider()/set_meter_provider() per process, so doing this per-app-instance
+# would silently no-op after the first test anyway.
+_otel_settings = get_settings()
+trace.set_tracer_provider(build_tracer_provider("codeautopsy-provenance", settings=_otel_settings))
+metrics.set_meter_provider(build_meter_provider("codeautopsy-provenance", settings=_otel_settings))
+_meter = metrics.get_meter("codeautopsy.provenance")
+
+decisions_indexed_counter = _meter.create_counter(
+    "codeautopsy.decisions.indexed",
+    unit="1",
+    description="AI decisions indexed into the provenance store, by ingest endpoint.",
+)
+incidents_counter = _meter.create_counter(
+    "codeautopsy.incidents",
+    unit="1",
+    description="Crash resolutions processed by /resolve and /v1/resolve, tagged by outcome.",
+)
 
 
 def _make_store(settings: Settings) -> ProvenanceStoreProtocol:
@@ -88,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
+    FastAPIInstrumentor.instrument_app(app)
 
     @app.get("/health")
     def health() -> dict:
@@ -97,11 +121,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/provenance", status_code=201)
     def add(record: ProvenanceRecord) -> dict:
         store.add(record)
+        decisions_indexed_counter.add(1, {"endpoint": "public"})
         return {"added": True, "records": store.count()}
 
     @app.post("/provenance/bulk", status_code=201)
     def add_bulk(records: list[ProvenanceRecord]) -> dict:
         n = store.add_many(records)
+        decisions_indexed_counter.add(n, {"endpoint": "public_bulk"})
         return {"added": n, "records": store.count()}
 
     @app.get("/provenance", response_model=list[ProvenanceRecord])
@@ -117,7 +143,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/resolve", response_model=ResolveResponse)
     def resolve(req: ResolveRequest) -> ResolveResponse:
-        return resolve_provenance(store, req, repo=settings.target_repo)
+        resp = resolve_provenance(store, req, repo=settings.target_repo)
+        incidents_counter.add(1, {"endpoint": "public", "resolved": resp.resolved})
+        return resp
 
     # --- /v1: authenticated, tenant-scoped API for the hosted multi-tenant SaaS -------------
 
@@ -172,6 +200,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Never trust org_id from the request body — always the authenticated key's org.
         record.org_id = org_id
         store.add(record)
+        decisions_indexed_counter.add(1, {"endpoint": "v1", "org_id": org_id})
         return {"added": True, "records": store.count(org_id=org_id)}
 
     @app.post("/v1/provenance/bulk", status_code=201)
@@ -181,11 +210,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for r in records:
             r.org_id = org_id
         n = store.add_many(records)
+        decisions_indexed_counter.add(n, {"endpoint": "v1_bulk", "org_id": org_id})
         return {"added": n, "records": store.count(org_id=org_id)}
 
     @app.post("/v1/resolve", response_model=ResolveResponse)
     def v1_resolve(req: ResolveRequest, org_id: str = Depends(require_api_key)) -> ResolveResponse:
         resp = resolve_provenance(store, req, repo=settings.target_repo, org_id=org_id)
+        incidents_counter.add(1, {"endpoint": "v1", "org_id": org_id, "resolved": resp.resolved})
         store.add_incident(
             IncidentRecord(
                 org_id=org_id,

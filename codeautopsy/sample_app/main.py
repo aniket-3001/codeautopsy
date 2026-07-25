@@ -14,12 +14,18 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
+from opentelemetry._logs import set_logger_provider
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import Status, StatusCode
 
 from codeautopsy.config import get_settings
 from codeautopsy.enricher.core import autopsy_exception, locate_crash_frame
-from codeautopsy.otel import build_meter_provider, build_tracer_provider, force_utf8_stdout
+from codeautopsy.otel import (
+    build_logger_provider,
+    build_meter_provider,
+    build_tracer_provider,
+    force_utf8_stdout,
+)
 
 force_utf8_stdout()
 
@@ -66,6 +72,15 @@ _meter_provider = build_meter_provider(
 )
 metrics.set_meter_provider(_meter_provider)
 meter = metrics.get_meter("codeautopsy.sample_app")
+
+# So the enricher's autopsy log (the AI's reasoning, trace-correlated) actually reaches
+# SigNoz instead of silently using the API's no-op default LoggerProvider.
+_logger_provider = build_logger_provider(
+    settings.runtime_service_name,
+    resource_attrs={"deployment.commit.sha": DEPLOYED_COMMIT_SHA},
+    settings=settings,
+)
+set_logger_provider(_logger_provider)
 
 # The metric that closes the Auto-Heal loop: a real OTel Counter SigNoz can alert on. When
 # a judge crashes this endpoint, this counter's rate spikes, a SigNoz alert rule fires its

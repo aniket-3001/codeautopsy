@@ -9,6 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+from opentelemetry._logs import SeverityNumber
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -33,6 +36,13 @@ def _memory_provider() -> tuple[TracerProvider, InMemorySpanExporter]:
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    return provider, exporter
+
+
+def _memory_log_provider() -> tuple[LoggerProvider, InMemoryLogRecordExporter]:
+    exporter = InMemoryLogRecordExporter()
+    provider = LoggerProvider()
+    provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
     return provider, exporter
 
 
@@ -90,6 +100,71 @@ def test_autopsy_exception_resolved_creates_span_link(monkeypatch):
     # must match what actually got exported — not just be non-empty.
     assert resolution.crash_trace_id == format(autopsy_span.context.trace_id, "032x")
     assert resolution.crash_span_id == format(autopsy_span.context.span_id, "016x")
+
+
+def test_autopsy_exception_resolved_emits_trace_correlated_log(monkeypatch):
+    """The AI's reasoning must be queryable as a SigNoz log line, not just a span attribute —
+    and it must carry the *same* trace/span ids as the autopsy span itself, so a judge can
+    filter logs by trace and land on this exact crash."""
+    rec = _record()
+    monkeypatch.setattr(
+        "codeautopsy.enricher.core.resolve_decision",
+        lambda *a, **k: ResolveResponse(resolved=True, introducing_commit="abc123", record=rec),
+    )
+    span_provider, span_exporter = _memory_provider()
+    log_provider, log_exporter = _memory_log_provider()
+
+    try:
+        int("GIMME50")
+    except ValueError as exc:
+        autopsy_exception(
+            exc,
+            commit_sha="abc123",
+            file_path="app.py",
+            line=2,
+            tracer_provider=span_provider,
+            logger_provider=log_provider,
+        )
+
+    autopsy_span = span_exporter.get_finished_spans()[0]
+    logs = log_exporter.get_finished_logs()
+    assert len(logs) == 1
+    record = logs[0].log_record
+
+    assert record.trace_id == autopsy_span.context.trace_id
+    assert record.span_id == autopsy_span.context.span_id
+    assert record.severity_number == SeverityNumber.INFO
+    assert "assuming input is always valid" in record.body
+    assert record.attributes["codeautopsy.decision.id"] == "dec_1"
+    assert record.attributes["codeautopsy.risk_flags"] == "assumed_valid_input"
+    assert record.attributes["codeautopsy.resolved"] is True
+
+
+def test_autopsy_exception_unresolved_emits_warn_log_without_decision_attrs(monkeypatch):
+    monkeypatch.setattr(
+        "codeautopsy.enricher.core.resolve_decision",
+        lambda *a, **k: ResolveResponse(resolved=False, detail="no provenance found"),
+    )
+    span_provider, _ = _memory_provider()
+    log_provider, log_exporter = _memory_log_provider()
+
+    try:
+        raise KeyError("missing")
+    except KeyError as exc:
+        autopsy_exception(
+            exc,
+            commit_sha="x",
+            file_path="f.py",
+            line=1,
+            tracer_provider=span_provider,
+            logger_provider=log_provider,
+        )
+
+    record = log_exporter.get_finished_logs()[0].log_record
+    assert record.severity_number == SeverityNumber.WARN
+    assert "unresolved" in record.body
+    assert "codeautopsy.decision.id" not in record.attributes
+    assert record.attributes["codeautopsy.resolved"] is False
 
 
 def test_autopsy_exception_unresolved_has_no_link(monkeypatch):

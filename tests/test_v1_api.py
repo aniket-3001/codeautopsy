@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import codeautopsy.provenance.service as service_module
 from codeautopsy.config import Settings
 from codeautopsy.provenance.service import create_app
 
@@ -161,6 +162,49 @@ def test_ingest_resolve_and_dashboard_round_trip(tmp_path: Path):
     assert incident["resolved"] is True
     assert incident["decision_id"] == "dec_7f3a"
     assert incident["blast_radius"] == 3
+
+
+def test_v1_ingest_emits_decisions_indexed_metric_tagged_by_org(tmp_path: Path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        service_module.decisions_indexed_counter,
+        "add",
+        lambda n, attrs=None: calls.append((n, attrs)),
+    )
+    client = _client(tmp_path)
+    signup = _signup(client, "dev@example.com")
+    api_key = client.post("/v1/keys", headers=_auth_headers(signup["access_token"])).json()["key"]
+
+    client.post("/v1/provenance", json=_record_payload(), headers={"X-Api-Key": api_key})
+    client.post(
+        "/v1/provenance/bulk",
+        json=[_record_payload(decision_id="dec_2")],
+        headers={"X-Api-Key": api_key},
+    )
+
+    assert calls == [
+        (1, {"endpoint": "v1", "org_id": signup["org_id"]}),
+        (1, {"endpoint": "v1_bulk", "org_id": signup["org_id"]}),
+    ]
+
+
+def test_v1_resolve_emits_incidents_metric_tagged_by_org_and_outcome(tmp_path: Path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        service_module.incidents_counter, "add", lambda n, attrs=None: calls.append((n, attrs))
+    )
+    client = _client(tmp_path)
+    signup = _signup(client, "dev@example.com")
+    api_key = client.post("/v1/keys", headers=_auth_headers(signup["access_token"])).json()["key"]
+    client.post("/v1/provenance", json=_record_payload(), headers={"X-Api-Key": api_key})
+
+    client.post(
+        "/v1/resolve",
+        json={"commit_sha": "abc123", "file_path": "app/payment.py", "line": 42},
+        headers={"X-Api-Key": api_key},
+    )
+
+    assert calls == [(1, {"endpoint": "v1", "org_id": signup["org_id"], "resolved": True})]
 
 
 def test_resolve_persists_crash_trace_ids_for_signoz_deeplink(tmp_path: Path):

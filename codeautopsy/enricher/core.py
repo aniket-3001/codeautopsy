@@ -14,8 +14,11 @@ from pathlib import Path
 
 import httpx
 from opentelemetry import trace
+from opentelemetry._logs import LogRecord, SeverityNumber, get_logger, get_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Link, SpanContext, Status, StatusCode, TraceFlags
+from opentelemetry.util.types import AnyValue
 
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.enricher.incidents import record_incident
@@ -113,6 +116,59 @@ def _decision_link(record) -> Link | None:
     )
 
 
+def _emit_autopsy_log(
+    span_ctx: SpanContext,
+    resolution: ResolveResponse,
+    cause: str,
+    *,
+    file_path: str,
+    line: int,
+    commit_sha: str,
+    logger_provider: LoggerProvider | None = None,
+) -> None:
+    """Emit a trace-correlated log record carrying the crash's cause of death.
+
+    When resolved, the log body is the AI's own reasoning — so the *why* behind a crash is
+    queryable as a SigNoz log line (filter/search over `codeautopsy.decision.summary`), not
+    just a span attribute you have to open a trace to see. `trace_id`/`span_id` are set
+    explicitly from the autopsy span's own context so this correlates to that exact span
+    regardless of the ambient OTel context the caller happens to be in.
+    """
+    logger = get_logger("codeautopsy.enricher", logger_provider=logger_provider)
+    if resolution.resolved and resolution.record:
+        rec = resolution.record
+        severity = SeverityNumber.INFO
+        body = f"autopsy resolved: {cause} — {rec.reasoning_summary}"
+        attributes: dict[str, AnyValue] = {
+            "codeautopsy.decision.id": rec.decision_id,
+            "codeautopsy.decision.summary": rec.reasoning_summary,
+            "codeautopsy.risk_flags": ",".join(rec.risk_flags),
+        }
+    else:
+        severity = SeverityNumber.WARN
+        body = f"autopsy unresolved: {cause}"
+        attributes = {}
+    attributes.update(
+        {
+            "code.filepath": file_path,
+            "code.lineno": line,
+            "deployment.commit.sha": commit_sha,
+            "codeautopsy.resolved": resolution.resolved,
+        }
+    )
+    logger.emit(
+        LogRecord(
+            trace_id=span_ctx.trace_id,
+            span_id=span_ctx.span_id,
+            trace_flags=span_ctx.trace_flags,
+            severity_number=severity,
+            severity_text=severity.name,
+            body=body,
+            attributes=attributes,
+        )
+    )
+
+
 def autopsy_exception(
     exc: BaseException,
     *,
@@ -122,13 +178,15 @@ def autopsy_exception(
     blast_radius: int = 1,
     settings: Settings | None = None,
     tracer_provider: TracerProvider | None = None,
+    logger_provider: LoggerProvider | None = None,
     context: dict | None = None,
     repo_root: Path | None = None,
 ) -> ResolveResponse:
     """Called from the sample app's exception path. Mints the linked autopsy span.
 
-    `tracer_provider` is injectable so tests can pass an in-memory provider instead of
-    touching global OTel state (and instead of making a real network export call).
+    `tracer_provider` / `logger_provider` are injectable so tests can pass in-memory
+    providers instead of touching global OTel state (and instead of making a real network
+    export call).
 
     `context` is the reproduction input (e.g. the request payload) that triggered the
     crash; `repo_root` is where to log it. Both optional — the Fix Bot reads this incident
@@ -193,15 +251,30 @@ def autopsy_exception(
         span.set_status(Status(StatusCode.ERROR, "autopsy could not resolve a decision"))
 
     span.end()
+    _emit_autopsy_log(
+        span_ctx,
+        resolution,
+        cause,
+        file_path=file_path,
+        line=line,
+        commit_sha=commit_sha,
+        logger_provider=logger_provider,
+    )
 
     # Cloud Run only guarantees CPU while a request is in flight — the BatchSpanProcessor's
-    # background export thread can get frozen before it flushes once this response returns.
-    # Force the flush now, inside the request's CPU-active window, so the crash span is
-    # actually on the wire before autopsy_exception() hands back to the caller.
+    # (and BatchLogRecordProcessor's) background export thread can get frozen before it
+    # flushes once this response returns. Force both flushes now, inside the request's
+    # CPU-active window, so the crash span and its reasoning log are actually on the wire
+    # before autopsy_exception() hands back to the caller.
     provider = tracer_provider or trace.get_tracer_provider()
     force_flush = getattr(provider, "force_flush", None)
     if force_flush is not None:
         force_flush(timeout_millis=3000)
+
+    log_provider = logger_provider or get_logger_provider()
+    log_force_flush = getattr(log_provider, "force_flush", None)
+    if log_force_flush is not None:
+        log_force_flush(timeout_millis=3000)
 
     if repo_root is not None:
         record_incident(

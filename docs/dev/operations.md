@@ -164,6 +164,26 @@ git push origin v0.1.1
 
 ---
 
+## Telemetry emitted
+
+Both services set a real `TracerProvider`/`MeterProvider` at import time (`codeautopsy/otel.py`)
+and are wrapped in `FastAPIInstrumentor` — every request is a trace. The sample app additionally
+sets a `LoggerProvider` so the enricher's reasoning log actually ships.
+
+| Signal | Name | Service | Emitted by |
+|---|---|---|---|
+| Metric (counter) | `codeautopsy.crashes` | sample-app | `sample_app/main.py` — what the Auto-Heal alert rule watches |
+| Metric (counter) | `codeautopsy.decisions.indexed` | provenance | `provenance/service.py`, tagged `endpoint` (`public`/`public_bulk`/`v1`/`v1_bulk`) and `org_id` on `/v1/*` |
+| Metric (counter) | `codeautopsy.incidents` | provenance | `provenance/service.py`, tagged `endpoint`, `org_id`, and `resolved` |
+| Log | (unnamed record) | sample-app | `enricher/core.py::_emit_autopsy_log` — trace-correlated (same trace/span id as the `codeautopsy.autopsy` span). Body is the AI's `reasoning_summary` when resolved, `INFO`; a short unresolved note otherwise, `WARN`. |
+
+To turn the two new provenance-service counters into a second dashboard (mirroring
+`dashboards/codeautopsy-blast-radius.json`, which is trace-only): **Dashboards > New > Panel**,
+metrics data source, aggregate attribute `codeautopsy.decisions.indexed` / `codeautopsy.incidents`
+(temporality **Cumulative** — SigNoz matches metric queries on temporality exactly; asking with
+the wrong one silently returns zero rather than an error), space aggregation `sum`, group by
+`org_id` / `resolved`.
+
 ## Auto-Heal loop — one-time wiring
 
 The loop is: **sample app crashes → SigNoz alert → API webhook → `repository_dispatch` → Fix Bot

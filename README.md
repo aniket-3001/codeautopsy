@@ -38,6 +38,25 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
                        └─► codeautopsy.autopsy ───┘   (OTel span link — THE JUMP)
 ```
 
+## SigNoz feature coverage
+
+Not just traces. Every service CodeAutopsy runs is instrumented, and each SigNoz signal type
+does a distinct, load-bearing job in the product — not a checkbox integration:
+
+| SigNoz capability | Where it's used | Why |
+|---|---|---|
+| **Traces + span links** | `codeautopsy/enricher/core.py` (`codeautopsy.autopsy` span) | The core thesis: an OTel span link jumps a runtime crash trace to the dev-time decision trace that authored the crashing line. Validated on real SigNoz Cloud infra (`scripts/day0_smoke.py`). |
+| **Custom metrics** | `codeautopsy.crashes` (`sample_app/main.py`), `codeautopsy.decisions.indexed` + `codeautopsy.incidents` (`provenance/service.py`) | `codeautopsy.crashes` is what the Auto-Heal alert rule watches. The two provenance-service counters make ingest volume and resolution outcome queryable independent of any single trace. |
+| **Logs, trace-correlated** | `enricher/core.py::_emit_autopsy_log` | The AI's own reasoning is emitted as a log record carrying the *same* trace/span id as the autopsy span — so "why did this crash" is filterable as a SigNoz log line, not something you have to open a trace to read. |
+| **Alerts → webhook** | Alert rule on `codeautopsy.crashes` → `POST /v1/heal/webhook` (see `docs/dev/operations.md`) | Closes the Auto-Heal loop (L4): a real SigNoz alert — not a poller — is what triggers the Fix Bot with zero human in the loop. |
+| **Dashboards** | [`dashboards/codeautopsy-blast-radius.json`](dashboards/codeautopsy-blast-radius.json) — 8 panels across traces, spanning overview stats, time series, a risk-flag leaderboard, and a live unresolved-crash queue | One click from the web app (`Blast Radius in SigNoz 🔍`) into a dashboard built entirely from `codeautopsy.autopsy` span attributes. |
+| **MCP — emitting, not just consuming** | `codeautopsy/mcp/server.py` | The inverse of "agent queries SigNoz's MCP server": CodeAutopsy *is* an MCP server, exposing `autopsy`/`prognose`/`leaderboard` as agent-callable tools over the provenance index SigNoz's own MCP server has no way to know about. |
+| **Both services traced** | `sample_app/main.py` **and** `provenance/service.py` (`FastAPIInstrumentor`) | The dashboard/API backend isn't a silent, unobserved control plane — it's a first-class instrumented service in the same SigNoz Cloud tenant as the sample app. |
+
+Every service exports to a **real, hosted SigNoz Cloud tenant** (`in2` region), not a local
+ephemeral container spun up for the demo — the telemetry above is what's actually live in
+production right now.
+
 ## Status
 
 - ✅ **Day-0 validated:** span-link click navigates across traces/services in SigNoz Cloud
@@ -46,20 +65,25 @@ POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
 - ✅ Recorder — real Claude Code `PostToolUse` hook (`codeautopsy-hook`, wired via
   `.claude/settings.json`), risk-flag detection, commit indexer.
 - ✅ Sample app (checkout-api with a seeded bug) + Autopsy Enricher (mints the linked
-  `codeautopsy.autopsy` span) + incident log for reproduction context.
+  `codeautopsy.autopsy` span, plus a trace-correlated log of the AI's own reasoning) + incident
+  log for reproduction context.
 - ✅ Coroner CLI — `codeautopsy autopsy`, `index-commit`, `status`.
 - ✅ Fix Bot — `codeautopsy fix <commit> <file> <line>`: feeds the agent its own genealogy,
   verifies the patch with a real regression test before committing anything, opens a PR via
-  `gh` with `--push`. 101 tests passing, 100% coverage, ruff + mypy clean (`pytest`).
-- ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test on every
-  push, image published to GHCR on `main`, landing page deployed via GitHub Pages.
-- ✅ Live on Google Cloud Run (see [Deployment](#deployment) below) — provenance + sample app
+  `gh` with `--push`.
+- ✅ 270+ tests (246 Python + 30 Playwright frontend), ≥95% coverage gate enforced in CI
+  (`ruff check` + `mypy` + `pytest` clean).
+- ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test (backend
+  *and* frontend) on every push, image published to GHCR on `main`, landing page deployed via
+  GitHub Pages.
+- ✅ Live on Google Cloud Run (see [Deployment](#deployment) below) — provenance + sample app,
+  both instrumented (traces, metrics, and — for the sample app — trace-correlated logs).
 - ✅ Persistent store — provenance data lives in Cloud SQL (Postgres) and survives redeploys
 - ✅ Interactive [sandbox demo](https://aniket-3001.github.io/codeautopsy/demo.html) — trigger the real bug, submit a decision, watch it resolve, live
   deployed and validated end-to-end on real infra, redeployed automatically on every push to
   `main`.
-- 🚧 Stretch: fully-automatic loop via SigNoz alert webhook; self-learning lesson write-back
-  to the agent's rules file; SigNoz dashboards.
+- 🚧 Stretch: self-learning lesson write-back to the agent's rules file; a second SigNoz
+  dashboard built on the new provenance-service metrics.
 
 **Landing page:** https://aniket-3001.github.io/codeautopsy/ — built from
 [`docs/index.html`](docs/index.html), deployed via GitHub Pages
