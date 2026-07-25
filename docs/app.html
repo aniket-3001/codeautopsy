@@ -242,7 +242,7 @@ function openSigNozModal({ title, img, caption, liveHref, liveLabel }) {
     <a href="${liveHref}" target="_blank" rel="noopener" class="mono mt-4 flex items-center justify-center gap-2 rounded-xl border border-cyan-400/40 bg-cyan-400/5 px-4 py-3 text-sm font-medium text-cyan-700 transition hover:-translate-y-0.5 hover:bg-cyan-400/10 dark:text-cyan-300">
       ${esc(liveLabel || "Open live in SigNoz")} — opens SigNoz (login required) ↗
     </a>
-    <p class="mt-2 text-center text-[11px] text-zinc-400">Want live access? Email <a href="mailto:angadjeetsingh7370@gmail.com?subject=CodeAutopsy%20%E2%80%94%20SigNoz%20viewer%20access" class="underline hover:text-zinc-500 dark:hover:text-zinc-300">angadjeetsingh7370@gmail.com</a> and I'll add you as a read-only viewer.</p>`, { wide: true });
+    <p class="mt-2 text-center text-[11px] text-zinc-400">Want live access? Email <a href="mailto:aniket22073@iiitd.ac.in?subject=CodeAutopsy%20%E2%80%94%20SigNoz%20viewer%20access" class="underline hover:text-zinc-500 dark:hover:text-zinc-300">aniket22073@iiitd.ac.in</a> and I'll add you as a read-only viewer.</p>`, { wide: true });
   const el = document.getElementById("signoz-proof-img");
   if (el) el.addEventListener("error", () => {
     el.outerHTML = `<div class="p-8 text-center text-sm text-zinc-400">Screenshot not added yet — save it to <code class="mono">docs/${esc(img)}</code>, then commit &amp; push. The live link below still works (login required).</div>`;

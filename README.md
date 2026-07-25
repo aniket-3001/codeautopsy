@@ -61,13 +61,6 @@ a boundary no other observability tool instruments: **dev-time → runtime.**
 
 ## The one trick
 
-```
-RUNTIME  (checkout-api)                    DEV-TIME  (claude-code)
-POST /checkout ─► parse_discount (500)     agent.turn ─► agent.tool.Edit
-                       │                          ▲   reasoning: "assuming input is valid"
-                       └─► codeautopsy.autopsy ───┘   (OTel span link — THE JUMP)
-```
-
 ```mermaid
 flowchart LR
     subgraph RT["🔥 runtime — checkout-api"]
@@ -96,14 +89,10 @@ that caused it."
 > **Judges — SigNoz proof without a login:** the web app shows captured screenshots of the real
 > trace + blast-radius dashboard in-app (SigNoz Cloud has no anonymous sharing). Want *live*
 > access to the SigNoz workspace? Email
-> [angadjeetsingh7370@gmail.com](mailto:angadjeetsingh7370@gmail.com?subject=CodeAutopsy%20%E2%80%94%20SigNoz%20viewer%20access)
+> [aniket22073@iiitd.ac.in](mailto:aniket22073@iiitd.ac.in?subject=CodeAutopsy%20%E2%80%94%20SigNoz%20viewer%20access)
 > and I'll add you as a read-only viewer.
 
 ## See it in action
-
-> **Note for reviewers:** the images below are placeholders (clearly labelled, with the
-> exact capture instructions baked into each one) pending real screenshots. The two SigNoz
-> images in the [next section](#signoz-proof-in-app) are real, already-captured screenshots.
 
 <table>
 <tr>
@@ -125,28 +114,28 @@ that caused it."
 
 ## Features
 
-- 🔗 **Span-link autopsy** — one click in SigNoz jumps from a runtime crash trace to the
+- **Span-link autopsy** — one click in SigNoz jumps from a runtime crash trace to the
   dev-time decision trace that authored the crashing line. Validated on real infra
   (`scripts/day0_smoke.py`).
-- 📝 **Provenance recorder** — a real Claude Code `PostToolUse` hook captures every AI
+- **Provenance recorder** — a real Claude Code `PostToolUse` hook captures every AI
   edit as a decision span, with reasoning and heuristic risk flags, agent-agnostic (works
   from any tool via `codeautopsy record`).
-- 🩺 **Coroner CLI** — `codeautopsy autopsy` resolves a crash to its decision; `codeautopsy
+- **Coroner CLI** — `codeautopsy autopsy` resolves a crash to its decision; `codeautopsy
   report` renders the *full* chain of custody as a shareable markdown postmortem.
-- 🤖 **Fix Bot** — hands the agent its own genealogy, verifies the patch with a real
+- **Fix Bot** — hands the agent its own genealogy, verifies the patch with a real
   regression test *before* committing anything, opens a PR. The loop stops at the PR — a
   human always merges (see [governance](docs/dev/governance.md)).
-- 🚨 **Auto-Heal (L4)** — a real SigNoz alert on `codeautopsy.crashes` — not a poller —
+- **Auto-Heal (L4)** — a real SigNoz alert on `codeautopsy.crashes` — not a poller —
   fires a webhook that drives the Fix Bot with zero human in the loop, live on the
   dashboard.
-- 📊 **Prognosis & Risk Gate** — price a snippet's risk *before* merge, against real
+- **Prognosis & Risk Gate** — price a snippet's risk *before* merge, against real
   production crash history — same engine as the CI PR-comment bot.
-- 🏆 **Leaderboard** — rank AI tools/models by real, measured crash rate. Not a benchmark
+- **Leaderboard** — rank AI tools/models by real, measured crash rate. Not a benchmark
   score — production outcomes.
-- 🔌 **MCP server** — CodeAutopsy *is* an MCP server (`autopsy`/`prognose`/`leaderboard`
+- **MCP server** — CodeAutopsy *is* an MCP server (`autopsy`/`prognose`/`leaderboard`
   as agent-callable tools), the inverse of most entries in this hackathon, which only
   *consume* SigNoz's MCP server.
-- 🏢 **Multi-tenant SaaS** — org-scoped accounts, API keys, JWT sessions, a full web
+- **Multi-tenant SaaS** — org-scoped accounts, API keys, JWT sessions, a full web
   dashboard — not just a CLI demo.
 
 ## SigNoz feature coverage
@@ -173,9 +162,9 @@ production right now.
 
 ### SigNoz proof, in-app
 
-SigNoz Cloud has no anonymous sharing, so a live deep-link dead-ends a judge at a login
-wall. The web app shows these two **real, already-captured** screenshots in-app instead —
-zero login required — via the dashboard's SigNoz proof modal:
+SigNoz Cloud doesn't support anonymous sharing. Instead of sending judges to a login wall,
+the dashboard's SigNoz proof modal shows these two **real, already-captured** screenshots
+directly in the app:
 
 <table>
 <tr>
@@ -205,7 +194,8 @@ flowchart TB
     Provenance -. traces + metrics .-> SigNoz
 
     SigNoz -->|"alert: codeautopsy.crashes"| Webhook["POST /v1/heal/webhook"]
-    Webhook --> FixBot["Fix Bot<br/>codeautopsy/fixbot/"]
+    Webhook -->|repository_dispatch| GHA["autoheal.yml<br/>GitHub Actions"]
+    GHA --> FixBot["Fix Bot<br/>codeautopsy/fixbot/"]
     FixBot -->|patch + regression test + commit| PR(["Pull Request<br/>a human merges"])
 
     Dashboard["Web dashboard<br/>docs/app.html"] --> Provenance
@@ -260,8 +250,9 @@ Every call is itself a span (`codeautopsy.mcp.*`) in the same SigNoz pipeline th
 the product exports to — dogfooding, not just an integration.
 
 ```bash
-pip install -e ".[mcp]"    # brings in the `mcp` package
-codeautopsy-mcp            # runs the server over stdio (the transport clients launch)
+pip install "codeautopsy[mcp]"    # published on PyPI — https://pypi.org/project/codeautopsy/
+# or, from a clone: pip install -e ".[mcp]"
+codeautopsy-mcp                   # runs the server over stdio (the transport clients launch)
 ```
 
 Register it with a client by pointing a stdio server at the `codeautopsy-mcp` command:
@@ -376,6 +367,18 @@ GitHub Actions (`.github/workflows/`):
   it to Artifact Registry, and redeploys both Cloud Run services. Authenticates via Workload
   Identity Federation (no long-lived key stored in GitHub). Stamps `CODEAUTOPSY_CI_RUN_URL`
   onto both services from `github.run_id`, closing the chain of custody one hop further.
+- **`autoheal.yml`** — triggered by `repository_dispatch` from the deployed provenance
+  service's `/v1/heal/webhook` (which itself only fires from a real SigNoz alert on
+  `codeautopsy.crashes`). Runs `codeautopsy fix --push --json` — the Fix Bot with zero human
+  in the loop — and reports the outcome back to the dashboard's Auto-Heal timeline
+  (`scripts/report_heal.py`). This is where the Fix Bot actually executes for a real Auto-Heal
+  run; the provenance service only dispatches, it never runs the Fix Bot in-process.
+- **`prognosis.yml`** — on every PR to `main`: runs `codeautopsy prognose` against the diff
+  and posts the risk-priced findings as a PR comment — the same engine the Risk Gate page
+  scores a pasted snippet with, run automatically pre-merge instead of on demand.
+- **`publish-pypi.yml`** — on a `v*.*.*` tag (or manual dispatch): builds and publishes to
+  PyPI via Trusted Publishing (OIDC — no stored API token). The package is live:
+  [`pip install codeautopsy`](https://pypi.org/project/codeautopsy/).
 
 ## Deployment
 
