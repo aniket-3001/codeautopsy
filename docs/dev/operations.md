@@ -67,6 +67,7 @@ does this via a service container (see `.github/workflows/ci.yml`).
 | `CODEAUTOPSY_GITHUB_REPO` | `owner/name` the Fix Bot patches (e.g. `aniket-3001/codeautopsy`). Empty ⇒ dispatch is a graceful no-op. |
 | `GITHUB_DISPATCH_TOKEN` | PAT (fine-grained, `contents:read`/`metadata` on that repo, or classic `repo`) allowed to fire the `autoheal` `repository_dispatch`. Empty ⇒ dispatch no-op. |
 | `CODEAUTOPSY_PUBLIC_BASE_URL` | The API's own public URL, embedded in the dispatch so the workflow knows where to report the PR back. |
+| `CODEAUTOPSY_CI_RUN_URL` | The GitHub Actions run that built + deployed the running revision. Set by `deploy-cloud-run.yml` from `github.server_url`/`github.repository`/`github.run_id`. Stamped on every crash span (`deployment.ci_run_url`) and persisted on the incident — extends the chain of custody one hop past the deployed commit. Empty outside a CI-deployed environment. |
 
 ---
 

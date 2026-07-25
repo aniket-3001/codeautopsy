@@ -77,6 +77,10 @@ class ResolveRequest(BaseModel):
     # deep-link an incident straight into its SigNoz trace (the money shot, in-dashboard).
     crash_trace_id: str = ""
     crash_span_id: str = ""
+    # The GitHub Actions run that built and deployed the *currently running* revision — the
+    # chain of custody's next hop past the decision span: reasoning -> commit -> CI run ->
+    # deployed revision. Empty outside a CI-deployed environment (e.g. local dev).
+    ci_run_url: str = ""
 
 
 class ResolveResponse(BaseModel):
@@ -118,4 +122,6 @@ class IncidentRecord(BaseModel):
     # incident. Nullable — a resolve triggered without a live crash trace simply has none.
     crash_trace_id: str | None = None
     crash_span_id: str | None = None
+    # The CI run that built and deployed the revision that crashed. Empty outside CI.
+    ci_run_url: str = ""
     created_at: str = Field(default_factory=_now)

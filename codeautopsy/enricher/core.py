@@ -57,6 +57,7 @@ def resolve_decision(
         exc_type=exc_type,
         exc_message=exc_message,
         blast_radius=blast_radius,
+        ci_run_url=settings.ci_run_url,
     )
     if settings.api_key:
         url = f"{settings.provenance_url}/v1/resolve"
@@ -225,6 +226,10 @@ def autopsy_exception(
     span.set_attribute("code.filepath", file_path)
     span.set_attribute("code.lineno", line)
     span.set_attribute("deployment.commit.sha", commit_sha)
+    if settings.ci_run_url:
+        # Extends the chain of custody one hop past the decision: reasoning -> commit -> this
+        # CI run -> the deployed revision that actually crashed.
+        span.set_attribute("deployment.ci_run_url", settings.ci_run_url)
 
     if resolution.resolved and resolution.record:
         rec = resolution.record

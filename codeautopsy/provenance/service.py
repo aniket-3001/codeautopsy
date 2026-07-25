@@ -230,6 +230,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 blast_radius=req.blast_radius,
                 crash_trace_id=req.crash_trace_id or None,
                 crash_span_id=req.crash_span_id or None,
+                ci_run_url=req.ci_run_url,
             )
         )
         return resp

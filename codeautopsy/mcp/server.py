@@ -59,7 +59,20 @@ def build_server() -> Any:
 
 
 def run() -> None:
-    """Run the server over stdio (the transport MCP clients launch)."""
+    """Run the server over stdio (the transport MCP clients launch).
+
+    Bootstraps a real TracerProvider here — not at module import time, so importing this
+    module for `build_server()` alone (as `test_server_registers_three_tools` does) stays
+    free of OTel side effects, matching the "importing this module stays cheap" contract
+    documented above. Every call an MCP client makes into `autopsy`/`prognose`/`leaderboard`
+    (`codeautopsy/mcp/core.py`) is now itself a span in the same SigNoz pipeline the rest of
+    CodeAutopsy exports to.
+    """
+    from opentelemetry import trace
+
+    from codeautopsy.otel import build_tracer_provider
+
+    trace.set_tracer_provider(build_tracer_provider("codeautopsy-mcp"))
     build_server().run()
 
 

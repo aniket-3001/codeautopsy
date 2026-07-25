@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # --- Service identity ---------------------------------------------------------
     dev_service_name: str = Field(default="claude-code", alias="CODEAUTOPSY_DEV_SERVICE")
     runtime_service_name: str = Field(default="checkout-api", alias="CODEAUTOPSY_RUNTIME_SERVICE")
+    # The GitHub Actions run that built + deployed the currently running revision. Set by
+    # deploy-cloud-run.yml from github.server_url/github.repository/github.run_id — empty
+    # outside a CI-deployed environment (e.g. local dev).
+    ci_run_url: str = Field(default="", alias="CODEAUTOPSY_CI_RUN_URL")
 
     # --- Provenance ---------------------------------------------------------------
     provenance_db: Path = Field(

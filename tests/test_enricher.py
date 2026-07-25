@@ -167,6 +167,50 @@ def test_autopsy_exception_unresolved_emits_warn_log_without_decision_attrs(monk
     assert record.attributes["codeautopsy.resolved"] is False
 
 
+def test_autopsy_exception_stamps_ci_run_url_when_configured(monkeypatch):
+    monkeypatch.setattr(
+        "codeautopsy.enricher.core.resolve_decision",
+        lambda *a, **k: ResolveResponse(resolved=False, detail="n/a"),
+    )
+    provider, exporter = _memory_provider()
+    settings = Settings(
+        CODEAUTOPSY_CI_RUN_URL="https://github.com/aniket-3001/codeautopsy/actions/runs/123"
+    )
+
+    try:
+        raise ValueError("boom")
+    except ValueError as exc:
+        autopsy_exception(
+            exc, commit_sha="x", file_path="f.py", line=1, settings=settings, tracer_provider=provider
+        )
+
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes["deployment.ci_run_url"] == (
+        "https://github.com/aniket-3001/codeautopsy/actions/runs/123"
+    )
+
+
+def test_autopsy_exception_omits_ci_run_url_when_not_configured(monkeypatch):
+    """Local dev / anything outside the CI-deployed environment shouldn't stamp a fake or
+    stale URL — the attribute must simply be absent, not empty-string noise on every span."""
+    monkeypatch.setattr(
+        "codeautopsy.enricher.core.resolve_decision",
+        lambda *a, **k: ResolveResponse(resolved=False, detail="n/a"),
+    )
+    provider, exporter = _memory_provider()
+    settings = Settings(CODEAUTOPSY_CI_RUN_URL="")
+
+    try:
+        raise ValueError("boom")
+    except ValueError as exc:
+        autopsy_exception(
+            exc, commit_sha="x", file_path="f.py", line=1, settings=settings, tracer_provider=provider
+        )
+
+    span = exporter.get_finished_spans()[0]
+    assert "deployment.ci_run_url" not in span.attributes
+
+
 def test_autopsy_exception_unresolved_has_no_link(monkeypatch):
     monkeypatch.setattr(
         "codeautopsy.enricher.core.resolve_decision",
@@ -346,6 +390,35 @@ def test_resolve_decision_uses_authenticated_v1_endpoint_when_api_key_set(monkey
     assert captured["headers"] == {"X-Api-Key": "ca_live_secret"}
     assert captured["json"]["exc_type"] == "ValueError"
     assert captured["json"]["blast_radius"] == 3
+
+
+def test_resolve_decision_carries_ci_run_url_from_settings(monkeypatch):
+    """The chain of custody's next hop past the commit: which CI run deployed the crashing
+    revision. Sent on every resolve so the provenance service can persist it on the incident."""
+    captured: dict = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"resolved": False, "detail": "n/a"}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        captured["json"] = json
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", _post)
+    settings = Settings(
+        CODEAUTOPSY_PROVENANCE_URL="http://localhost:8100",
+        CODEAUTOPSY_CI_RUN_URL="https://github.com/aniket-3001/codeautopsy/actions/runs/123",
+    )
+
+    resolve_decision(settings, "abc123", "f.py", 1)
+
+    assert captured["json"]["ci_run_url"] == (
+        "https://github.com/aniket-3001/codeautopsy/actions/runs/123"
+    )
 
 
 def test_resolve_decision_uses_public_endpoint_without_api_key(monkeypatch):

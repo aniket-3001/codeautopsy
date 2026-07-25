@@ -9,11 +9,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.trace import Status, StatusCode
+
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.provenance.indexer import resolve as resolve_provenance
 from codeautopsy.provenance.models import ResolveRequest, ResolveResponse
 from codeautopsy.provenance.store import ProvenanceStoreProtocol, make_store
 from codeautopsy.reliability.core import compute_leaderboard, score_snippet
+
+_tracer_name = "codeautopsy.mcp"
 
 
 def _autopsy_payload(
@@ -54,22 +60,43 @@ def autopsy(
     org_id: str = "demo-public",
     store: ProvenanceStoreProtocol | None = None,
     settings: Settings | None = None,
+    tracer_provider: TracerProvider | None = None,
 ) -> dict:
     """Resolve a crash coordinate to the AI decision that authored the line.
 
     Blames `file_path:line` at the deployed `commit_sha` back to its introducing commit, then
     returns the recorded AI decision (reasoning, tool/model, risk flags) for that line range.
+
+    Every call is a span, `tracer_provider` injectable for tests — dogfooding: the tool
+    CodeAutopsy hands other agents is itself observed by the same SigNoz pipeline it
+    instruments everything else with. An MCP tool call can go quiet in two different ways —
+    it can raise, or it can return a perfectly well-formed result that just didn't find
+    anything — and only the first one shows up if you only wrap the call in a try/except.
+    The span attribute below makes the second kind ("resolved": false) queryable too,
+    without misrepresenting a legitimate "no match" as an error.
     """
-    settings = settings or get_settings()
-    store = store or make_store(settings)
-    repo_path: str | Path | None = repo if repo is not None else settings.target_repo
-    resp = resolve_provenance(
-        store,
-        ResolveRequest(commit_sha=commit_sha, file_path=file_path, line=line),
-        repo=repo_path,
-        org_id=org_id,
-    )
-    return _autopsy_payload(resp, commit_sha, file_path, line)
+    tracer = trace.get_tracer(_tracer_name, tracer_provider=tracer_provider)
+    with tracer.start_as_current_span("codeautopsy.mcp.autopsy") as span:
+        span.set_attribute("code.filepath", file_path)
+        span.set_attribute("code.lineno", line)
+        span.set_attribute("codeautopsy.commit_sha", commit_sha[:12])
+        try:
+            settings = settings or get_settings()
+            store = store or make_store(settings)
+            repo_path: str | Path | None = repo if repo is not None else settings.target_repo
+            resp = resolve_provenance(
+                store,
+                ResolveRequest(commit_sha=commit_sha, file_path=file_path, line=line),
+                repo=repo_path,
+                org_id=org_id,
+            )
+            payload = _autopsy_payload(resp, commit_sha, file_path, line)
+            span.set_attribute("codeautopsy.mcp.resolved", payload["resolved"])
+            return payload
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            raise
 
 
 def prognose(
@@ -79,11 +106,22 @@ def prognose(
     org_id: str = "demo-public",
     store: ProvenanceStoreProtocol | None = None,
     settings: Settings | None = None,
+    tracer_provider: TracerProvider | None = None,
 ) -> dict:
     """Price a snippet's risk against this project's real production crash history."""
-    settings = settings or get_settings()
-    store = store or make_store(settings)
-    return score_snippet(store, code, reasoning, org_id=org_id).model_dump()
+    tracer = trace.get_tracer(_tracer_name, tracer_provider=tracer_provider)
+    with tracer.start_as_current_span("codeautopsy.mcp.prognose") as span:
+        span.set_attribute("codeautopsy.mcp.snippet_length", len(code))
+        try:
+            settings = settings or get_settings()
+            store = store or make_store(settings)
+            result = score_snippet(store, code, reasoning, org_id=org_id).model_dump()
+            span.set_attribute("codeautopsy.mcp.verdict", result["verdict"])
+            return result
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            raise
 
 
 def leaderboard(
@@ -91,8 +129,19 @@ def leaderboard(
     org_id: str = "demo-public",
     store: ProvenanceStoreProtocol | None = None,
     settings: Settings | None = None,
+    tracer_provider: TracerProvider | None = None,
 ) -> dict:
     """Rank the AI tools/models used in this project by real production crash rate."""
-    settings = settings or get_settings()
-    store = store or make_store(settings)
-    return compute_leaderboard(store, org_id=org_id).model_dump()
+    tracer = trace.get_tracer(_tracer_name, tracer_provider=tracer_provider)
+    with tracer.start_as_current_span("codeautopsy.mcp.leaderboard") as span:
+        try:
+            settings = settings or get_settings()
+            store = store or make_store(settings)
+            result = compute_leaderboard(store, org_id=org_id).model_dump()
+            span.set_attribute("codeautopsy.mcp.total_decisions", result["total_decisions"])
+            span.set_attribute("codeautopsy.mcp.total_incidents", result["total_incidents"])
+            return result
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            raise

@@ -11,6 +11,10 @@ import importlib.util
 import tempfile
 
 import pytest
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 from codeautopsy.config import Settings
 from codeautopsy.mcp import core
@@ -23,6 +27,13 @@ _HAS_MCP = importlib.util.find_spec("mcp") is not None
 @pytest.fixture
 def store() -> ProvenanceStore:
     return ProvenanceStore(tempfile.NamedTemporaryFile(suffix=".db", delete=False).name)
+
+
+def _memory_provider() -> tuple[TracerProvider, InMemorySpanExporter]:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    return provider, exporter
 
 
 def _settings() -> Settings:
@@ -123,6 +134,145 @@ def test_leaderboard_ranks_tools(store: ProvenanceStore) -> None:
     assert out["total_incidents"] == 1
     assert out["scores"], "expected at least one ranked tool/model"
     assert out["scores"][0]["tool"] == "claude-code"
+
+
+def test_autopsy_span_records_resolved_without_error_status(store: ProvenanceStore) -> None:
+    store.add(_record())
+    provider, exporter = _memory_provider()
+    core.autopsy(
+        "abc123def456",
+        "app/payment.py",
+        42,
+        repo=None,
+        store=store,
+        settings=_settings(),
+        tracer_provider=provider,
+    )
+    span = exporter.get_finished_spans()[0]
+    assert span.name == "codeautopsy.mcp.autopsy"
+    assert span.attributes["codeautopsy.mcp.resolved"] is True
+    assert span.attributes["code.filepath"] == "app/payment.py"
+    assert span.status.status_code == StatusCode.UNSET
+
+
+def test_autopsy_span_records_unresolved_as_attribute_not_as_an_error(
+    store: ProvenanceStore,
+) -> None:
+    """A crash with no matching decision is a legitimate, correct answer — not a bug in the
+    tool — so the span must stay OK/UNSET. This is the exact distinction opentel-mcp's
+    silent-failure detection misses if you only mark spans on the exception path: it would
+    call this a success (no exception raised), which is true at the protocol level but
+    hides the semantic outcome from anyone querying traces. Recording the attribute (without
+    flipping status to ERROR) makes it visible without crying wolf.
+    """
+    provider, exporter = _memory_provider()
+    core.autopsy(
+        "deadbeef",
+        "app/other.py",
+        9,
+        repo=None,
+        store=store,
+        settings=_settings(),
+        tracer_provider=provider,
+    )
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes["codeautopsy.mcp.resolved"] is False
+    assert span.status.status_code == StatusCode.UNSET
+
+
+def test_autopsy_span_records_exception_and_reraises(
+    store: ProvenanceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("store exploded")
+
+    monkeypatch.setattr(core, "resolve_provenance", _raise)
+    provider, exporter = _memory_provider()
+
+    with pytest.raises(RuntimeError, match="store exploded"):
+        core.autopsy(
+            "abc123def456",
+            "app/payment.py",
+            42,
+            repo=None,
+            store=store,
+            settings=_settings(),
+            tracer_provider=provider,
+        )
+
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code == StatusCode.ERROR
+    assert span.events[0].name == "exception"
+
+
+def test_prognose_span_records_verdict(store: ProvenanceStore) -> None:
+    provider, exporter = _memory_provider()
+    core.prognose(
+        "discount = int(request.args['code'])",
+        store=store,
+        settings=_settings(),
+        tracer_provider=provider,
+    )
+    span = exporter.get_finished_spans()[0]
+    assert span.name == "codeautopsy.mcp.prognose"
+    assert span.attributes["codeautopsy.mcp.verdict"] in {"priced", "flagged", "clear"}
+    assert span.attributes["codeautopsy.mcp.snippet_length"] == len(
+        "discount = int(request.args['code'])"
+    )
+
+
+def test_prognose_span_records_exception_and_reraises(
+    store: ProvenanceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("scoring blew up")
+
+    monkeypatch.setattr(core, "score_snippet", _raise)
+    provider, exporter = _memory_provider()
+
+    with pytest.raises(RuntimeError, match="scoring blew up"):
+        core.prognose("int(x)", store=store, settings=_settings(), tracer_provider=provider)
+
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code == StatusCode.ERROR
+    assert span.events[0].name == "exception"
+
+
+def test_leaderboard_span_records_exception_and_reraises(
+    store: ProvenanceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("leaderboard blew up")
+
+    monkeypatch.setattr(core, "compute_leaderboard", _raise)
+    provider, exporter = _memory_provider()
+
+    with pytest.raises(RuntimeError, match="leaderboard blew up"):
+        core.leaderboard(store=store, settings=_settings(), tracer_provider=provider)
+
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code == StatusCode.ERROR
+    assert span.events[0].name == "exception"
+
+
+def test_leaderboard_span_records_totals(store: ProvenanceStore) -> None:
+    store.add(_record(decision_id="d1"))
+    store.add_incident(
+        IncidentRecord(
+            org_id="demo-public",
+            commit_sha="abc123def456",
+            file_path="app/payment.py",
+            line=42,
+            resolved=True,
+            decision_id="d1",
+        )
+    )
+    provider, exporter = _memory_provider()
+    core.leaderboard(store=store, settings=_settings(), tracer_provider=provider)
+    span = exporter.get_finished_spans()[0]
+    assert span.name == "codeautopsy.mcp.leaderboard"
+    assert span.attributes["codeautopsy.mcp.total_decisions"] == 1
+    assert span.attributes["codeautopsy.mcp.total_incidents"] == 1
 
 
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")
