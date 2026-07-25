@@ -1,0 +1,119 @@
+{
+  "_comment": "SigNoz alert rules for CodeAutopsy's own telemetry. Create each in SigNoz -> Alerts -> New Alert -> rebuild the query shown here in the query builder (attribute/filter pickers vary slightly by SigNoz version, so treat this JSON as the exact metric/threshold to recreate, not a blind import) -> set the notification channel. See README.md in this folder for the exact webhook wiring for rule 1, which is the one that actually closes the Auto-Heal loop end to end.",
+  "rules": [
+    {
+      "alert": "CodeAutopsy: checkout-api crash detected",
+      "alertType": "METRIC_BASED_ALERT",
+      "ruleType": "threshold_rule",
+      "condition": {
+        "compositeQuery": {
+          "queryType": "builder",
+          "builder": {
+            "queryData": [
+              {
+                "dataSource": "metrics",
+                "queryName": "A",
+                "expression": "A",
+                "disabled": false,
+                "aggregateOperator": "increase",
+                "aggregateAttribute": {
+                  "key": "codeautopsy.crashes",
+                  "type": "Sum",
+                  "dataType": "float64"
+                },
+                "filters": { "op": "AND", "items": [] }
+              }
+            ],
+            "queryFormulas": []
+          }
+        },
+        "op": ">",
+        "target": 0,
+        "matchType": "1"
+      },
+      "evalWindow": "1m0s",
+      "frequency": "1m0s",
+      "labels": { "severity": "critical", "service": "checkout-api", "fault": "unhandled-crash" },
+      "annotations": {
+        "description": "checkout-api crashed {{$value}} time(s) in the last minute. This is the alert that fires CodeAutopsy's own Auto-Heal webhook — see README.md in this folder."
+      },
+      "preferredChannels": ["codeautopsy-autoheal-webhook"]
+    },
+    {
+      "alert": "CodeAutopsy: provenance service incident volume",
+      "alertType": "METRIC_BASED_ALERT",
+      "ruleType": "threshold_rule",
+      "condition": {
+        "compositeQuery": {
+          "queryType": "builder",
+          "builder": {
+            "queryData": [
+              {
+                "dataSource": "metrics",
+                "queryName": "A",
+                "expression": "A",
+                "disabled": false,
+                "aggregateOperator": "increase",
+                "aggregateAttribute": {
+                  "key": "codeautopsy.incidents",
+                  "type": "Sum",
+                  "dataType": "float64"
+                },
+                "filters": { "op": "AND", "items": [] }
+              }
+            ],
+            "queryFormulas": []
+          }
+        },
+        "op": ">",
+        "target": 3,
+        "matchType": "1"
+      },
+      "evalWindow": "5m0s",
+      "frequency": "1m0s",
+      "labels": { "severity": "warning", "service": "codeautopsy-provenance", "fault": "incident-volume" },
+      "annotations": {
+        "description": "{{$value}} crash resolutions processed by /resolve in 5 minutes (threshold 3). For this project's normal traffic that's a spike — check the dashboard's unresolved-crash queue to see if attribution is keeping up."
+      },
+      "preferredChannels": []
+    },
+    {
+      "alert": "CodeAutopsy: decision-recording pipeline flatline",
+      "alertType": "METRIC_BASED_ALERT",
+      "ruleType": "threshold_rule",
+      "condition": {
+        "compositeQuery": {
+          "queryType": "builder",
+          "builder": {
+            "queryData": [
+              {
+                "dataSource": "metrics",
+                "queryName": "A",
+                "expression": "A",
+                "disabled": false,
+                "aggregateOperator": "increase",
+                "aggregateAttribute": {
+                  "key": "codeautopsy.decisions.indexed",
+                  "type": "Sum",
+                  "dataType": "float64"
+                },
+                "filters": { "op": "AND", "items": [] }
+              }
+            ],
+            "queryFormulas": []
+          }
+        },
+        "op": "<",
+        "target": 1,
+        "matchType": "1"
+      },
+      "evalWindow": "30m0s",
+      "frequency": "5m0s",
+      "labels": { "severity": "info", "service": "codeautopsy-provenance", "fault": "no-decisions-recorded" },
+      "annotations": {
+        "description": "Zero AI decisions indexed in 30 minutes. Informational dead-canary: confirms whether the git hook / recorder is still actually wired up during a coding session, not necessarily an incident on its own."
+      },
+      "preferredChannels": []
+    }
+  ]
+}
