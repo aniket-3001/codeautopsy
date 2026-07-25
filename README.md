@@ -285,10 +285,12 @@ The server reads the developer's **own** local provenance index (SQLite, or Post
 ## Quickstart
 
 ```bash
-python -m pip install -e ".[dev]"
-cp .env.example .env          # add your SigNoz Cloud endpoint + ingestion key
-pytest                        # provenance join engine is fully unit-tested
-python scripts/day0_smoke.py  # emit the two linked traces into SigNoz
+python -m pip install -r requirements-lock.txt   # pinned, reproducible dependency set
+python -m pip install --no-deps -e ".[dev]"
+pre-commit install             # runs ruff + mypy on every commit (same checks as CI)
+cp .env.example .env           # add your SigNoz Cloud endpoint + ingestion key
+pytest                         # provenance join engine is fully unit-tested
+python scripts/day0_smoke.py   # emit the two linked traces into SigNoz
 ```
 
 ## Configuration
@@ -353,8 +355,9 @@ Runs on every push/PR via the `frontend` job in `ci.yml`. Nothing under `e2e/`,
 
 GitHub Actions (`.github/workflows/`):
 
-- **`ci.yml`** — on every push/PR to `main`: editable install, `ruff check`, `mypy`, `pytest`
-  with coverage (`fail_under = 95`, see `pyproject.toml`), coverage XML uploaded as an artifact.
+- **`ci.yml`** — on every push/PR to `main`: install from `requirements-lock.txt` (pinned,
+  reproducible) + editable install, `ruff check`, `mypy`, `pytest` with coverage
+  (`fail_under = 95`, see `pyproject.toml`), coverage XML uploaded as an artifact.
   Runs a `postgres:16` service container so `tests/test_provenance_postgres.py` exercises the
   real Postgres backend (skipped locally when `DATABASE_URL` isn't set). A second `frontend` job
   runs the Playwright suite against the real `docs/*.html` files with the backend mocked.
