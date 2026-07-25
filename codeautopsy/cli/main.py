@@ -191,6 +191,50 @@ def recall(
 
 
 @app.command()
+def report(
+    commit: str = typer.Argument(..., help="Deployed commit SHA of the crash."),
+    file: str = typer.Argument(..., help="Repo-relative file path of the crashing line."),
+    line: int = typer.Argument(..., help="Crashing line number."),
+    org_id: str = typer.Option("demo-public", "--org", help="Org whose lessons memory to check."),
+    out: Path = typer.Option(
+        None, "--out", help="Write the postmortem to this file instead of stdout."
+    ),
+) -> None:
+    """Render the full chain of custody as a shareable markdown postmortem.
+
+    Crash -> cause of death -> blame -> decision -> reasoning -> confidence -> lesson, in one
+    document — everything CodeAutopsy knows about a crash, assembled from the same local
+    provenance/incident data `codeautopsy fix` reads, but with nothing changed or committed.
+    """
+    from codeautopsy.fixbot.core import build_genealogy
+    from codeautopsy.fixbot.lessons import recall_lesson
+    from codeautopsy.postmortem.core import render_postmortem
+    from codeautopsy.provenance.store import make_store
+
+    settings = get_settings()
+    try:
+        genealogy = build_genealogy(settings, commit, file, line)
+    except FixBotError as exc:
+        console.print(f"[red]Could not assemble the postmortem:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    lesson_hit = recall_lesson(
+        make_store(settings),
+        cause_of_death=genealogy.cause_of_death,
+        file_path=file,
+        risk_flags=genealogy.risk_flags,
+        org_id=org_id,
+    )
+    markdown = render_postmortem(genealogy, lesson=lesson_hit, ci_run_url=settings.ci_run_url)
+
+    if out is not None:
+        out.write_text(markdown, encoding="utf-8")
+        console.print(f"[green]Postmortem written to[/green] {out}")
+    else:
+        console.print(markdown)
+
+
+@app.command()
 def fix(
     commit: str = typer.Argument(..., help="The deployed commit SHA."),
     file: str = typer.Argument(..., help="File path, repo-relative."),

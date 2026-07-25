@@ -42,6 +42,15 @@ extend something already shipped and already tested are the safer bet with limit
    incident modal. Extends the chain of custody one step past GreenLight's own pitch — the
    single closest thesis-overlap competitor — with real data, no synthetic numbers.
 
+3. **#3 — postmortem case-file generator.** ✅ Shipped. `codeautopsy report <commit> <file>
+   <line>` (`codeautopsy/postmortem/core.py`) renders the full chain of custody — crash, cause
+   of death, blame, decision, reasoning, attribution confidence, and any recalled lesson — as
+   one markdown document, to stdout or `--out FILE`. Reuses `fixbot.core.build_genealogy`
+   (already used by `fix`/`recall`) rather than re-deriving anything; `Genealogy` gained two
+   new optional fields (`confidence`, `confidence_factors`) threaded through from the existing
+   `ResolveResponse`. Degrades gracefully at every step (unresolved decision, no local incident
+   log entry, no lesson) instead of erroring or rendering blank.
+
 **Reconsidered and dropped:**
 
 - **#1 — dollar-cost accounting + "savings from memory."** Investigated, then deliberately
@@ -59,8 +68,6 @@ extend something already shipped and already tested are the safer bet with limit
 
 **Deliberately not building, for now:**
 
-- **#3 — postmortem generator.** Safe and cheap (all the data already exists), just less
-  differentiating than 2/6. Worth doing if there's time left after #6.
 - **#4 — fix efficacy tracking.** Good idea, real design complexity: what actually triggers
   "confirmed in prod" — a background check, a time window? Doesn't demo well live since it
   depends on time passing after a merge. Deprioritized given the clock.

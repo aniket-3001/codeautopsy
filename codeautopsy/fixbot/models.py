@@ -28,6 +28,11 @@ class Genealogy(BaseModel):
     # A lesson recalled from memory for this *class* of bug (a pure store read, no LLM). When
     # set, it is fed back into the agent's own prompt so it doesn't re-learn from scratch.
     prior_lesson: str = ""
+    # How confidently the decision above is the true author of the crashing line (0-1), and
+    # why (match kind, range width, position) — see provenance/confidence.py. None when
+    # unresolved. Not used by the Fix Bot's own prompt; carried for codeautopsy report.
+    confidence: float | None = None
+    confidence_factors: dict | None = None
 
 
 class FixProposal(BaseModel):

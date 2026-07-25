@@ -108,7 +108,13 @@ def test_build_genealogy_combines_provenance_and_incident(tmp_path: Path, monkey
     )
     monkeypatch.setattr(
         "codeautopsy.fixbot.core.resolve_decision",
-        lambda *a, **k: ResolveResponse(resolved=True, introducing_commit=head, record=rec),
+        lambda *a, **k: ResolveResponse(
+            resolved=True,
+            introducing_commit=head,
+            record=rec,
+            confidence=1.0,
+            confidence_factors={"label": "high", "match": "exact-commit"},
+        ),
     )
     append_incident(
         repo,
@@ -130,6 +136,8 @@ def test_build_genealogy_combines_provenance_and_incident(tmp_path: Path, monkey
     assert genealogy.exc_type == "ValueError"
     assert genealogy.context == {"discount_code": "GIMME50"}
     assert "def parse_amount" in genealogy.file_content
+    assert genealogy.confidence == 1.0
+    assert genealogy.confidence_factors == {"label": "high", "match": "exact-commit"}
 
 
 def test_build_genealogy_missing_file_raises(tmp_path: Path, monkeypatch):

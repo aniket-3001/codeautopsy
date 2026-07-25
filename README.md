@@ -70,11 +70,12 @@ production right now.
 - ✅ Sample app (checkout-api with a seeded bug) + Autopsy Enricher (mints the linked
   `codeautopsy.autopsy` span, plus a trace-correlated log of the AI's own reasoning) + incident
   log for reproduction context.
-- ✅ Coroner CLI — `codeautopsy autopsy`, `index-commit`, `status`.
+- ✅ Coroner CLI — `codeautopsy autopsy`, `report` (full chain of custody as a shareable
+  markdown postmortem), `index-commit`, `status`.
 - ✅ Fix Bot — `codeautopsy fix <commit> <file> <line>`: feeds the agent its own genealogy,
   verifies the patch with a real regression test before committing anything, opens a PR via
   `gh` with `--push`.
-- ✅ 288 tests (258 Python + 30 Playwright frontend), ≥95% coverage gate enforced in CI
+- ✅ 296 tests (266 Python + 30 Playwright frontend), ≥95% coverage gate enforced in CI
   (`ruff check` + `mypy` + `pytest` clean).
 - ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test (backend
   *and* frontend) on every push, image published to GHCR on `main`, landing page deployed via
@@ -100,7 +101,7 @@ production right now.
 | Provenance | `codeautopsy/provenance/` | SQLite (default) or Postgres (`DATABASE_URL`) store + git-blame indexer + `resolve` API |
 | Sample app | `codeautopsy/sample_app/` | Instrumented FastAPI "patient" with a seeded bug |
 | Enricher | `codeautopsy/enricher/` | On exception, mints the linked `codeautopsy.autopsy` span |
-| Coroner CLI | `codeautopsy/cli/` | `codeautopsy autopsy <trace>` — the chain of custody |
+| Coroner CLI | `codeautopsy/cli/` | `codeautopsy autopsy <trace>` — the chain of custody; `report` renders it as a shareable markdown postmortem |
 | Fix Bot | `codeautopsy/fixbot/` | `codeautopsy fix <trace>` — patch, verify, commit, PR |
 | MCP server | `codeautopsy/mcp/` | `codeautopsy-mcp` — exposes `autopsy`/`prognose`/`leaderboard` as agent-callable tools |
 

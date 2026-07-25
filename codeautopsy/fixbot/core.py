@@ -71,6 +71,8 @@ def build_genealogy(
         exc_message=(incident or {}).get("exc_message", ""),
         cause_of_death=(incident or {}).get("cause_of_death", ""),
         context=(incident or {}).get("context", {}),
+        confidence=resolution.confidence,
+        confidence_factors=resolution.confidence_factors,
     )
 
 

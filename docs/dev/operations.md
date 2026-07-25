@@ -42,7 +42,7 @@ snippet.
 ## Test / lint / type-check (the gate)
 
 ```bash
-pytest -q                        # 258 tests; 10 skip locally (need a live Postgres)
+pytest -q                        # 266 tests; 10 skip locally (need a live Postgres)
 ruff check codeautopsy/          # lint
 mypy codeautopsy/                # types
 ```
@@ -104,6 +104,10 @@ Auth: **U** = user JWT (`Authorization: Bearer`), **K** = API key (`X-Api-Key`),
 
 ```bash
 codeautopsy autopsy <commit> <file> <line>     # resolve a crash → the AI decision (coroner report)
+codeautopsy report <commit> <file> <line> [--org ORG] [--out FILE]
+                                                # full chain of custody as a shareable markdown
+                                                # postmortem: crash -> cause of death -> blame ->
+                                                # decision -> reasoning -> confidence -> lesson
 codeautopsy fix <commit> <file> <line> [--push] [--json] # Fix Bot: patch + regression test + commit/PR
                                                 # --json: one machine-readable result line (Auto-Heal workflow)
 codeautopsy index-commit [--repo PATH]         # bind pending edit-time decisions to HEAD

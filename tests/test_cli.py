@@ -201,6 +201,89 @@ def test_prognose_failure_exits_cleanly(monkeypatch, tmp_path):
     assert "Prognosis failed" in result.stdout
 
 
+def test_report_resolved_with_lesson(monkeypatch):
+    from codeautopsy.fixbot.models import Genealogy
+    from codeautopsy.provenance.models import LessonRecord
+
+    genealogy = Genealogy(
+        file_path="app/payment.py",
+        line=42,
+        commit_sha="abc123def456",
+        file_content="int(x)\n",
+        reasoning_summary="assuming the input is always valid",
+        risk_flags=["assumed_valid_input"],
+        decision_id="dec_7f3a",
+        exc_type="ValueError",
+        exc_message="bad input",
+        cause_of_death="invalid value — unvalidated input",
+        confidence=1.0,
+        confidence_factors={"label": "high", "match": "exact-commit"},
+    )
+    lesson = LessonRecord(
+        fingerprint="fp1", lesson="Validate before int().", times_seen=2, patch_summary="try/except"
+    )
+    monkeypatch.setattr("codeautopsy.fixbot.core.build_genealogy", lambda *a, **k: genealogy)
+    monkeypatch.setattr("codeautopsy.fixbot.lessons.recall_lesson", lambda *a, **k: lesson)
+    monkeypatch.setattr("codeautopsy.provenance.store.make_store", lambda settings: object())
+
+    result = runner.invoke(cli_main.app, ["report", "abc123def456", "app/payment.py", "42"])
+
+    assert result.exit_code == 0
+    assert "dec_7f3a" in result.stdout
+    assert "Validate before int()." in result.stdout
+    assert "Seen **2x**" in result.stdout
+
+
+def test_report_unresolved_degrades_gracefully(monkeypatch):
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(
+        file_path="app/other.py", line=9, commit_sha="deadbeef", file_content="x = 1\n"
+    )
+    monkeypatch.setattr("codeautopsy.fixbot.core.build_genealogy", lambda *a, **k: genealogy)
+    monkeypatch.setattr("codeautopsy.fixbot.lessons.recall_lesson", lambda *a, **k: None)
+    monkeypatch.setattr("codeautopsy.provenance.store.make_store", lambda settings: object())
+
+    result = runner.invoke(cli_main.app, ["report", "deadbeef", "app/other.py", "9"])
+
+    assert result.exit_code == 0
+    assert "No decision indexed for this line" in result.stdout
+    assert "No lesson recorded yet" in result.stdout
+
+
+def test_report_fixbot_error(monkeypatch):
+    def _raise(*a, **k):
+        raise FixBotError("does not exist under target repo")
+
+    monkeypatch.setattr("codeautopsy.fixbot.core.build_genealogy", _raise)
+
+    result = runner.invoke(cli_main.app, ["report", "abc123", "nope.py", "1"])
+
+    assert result.exit_code == 2
+    assert "Could not assemble the postmortem" in result.stdout
+
+
+def test_report_writes_to_file(monkeypatch, tmp_path):
+    from codeautopsy.fixbot.models import Genealogy
+
+    genealogy = Genealogy(
+        file_path="app/other.py", line=9, commit_sha="deadbeef", file_content="x = 1\n"
+    )
+    monkeypatch.setattr("codeautopsy.fixbot.core.build_genealogy", lambda *a, **k: genealogy)
+    monkeypatch.setattr("codeautopsy.fixbot.lessons.recall_lesson", lambda *a, **k: None)
+    monkeypatch.setattr("codeautopsy.provenance.store.make_store", lambda settings: object())
+    out_file = tmp_path / "postmortem.md"
+
+    result = runner.invoke(
+        cli_main.app, ["report", "deadbeef", "app/other.py", "9", "--out", str(out_file)]
+    )
+
+    assert result.exit_code == 0
+    assert "Postmortem written to" in result.stdout
+    assert out_file.exists()
+    assert "# Postmortem" in out_file.read_text(encoding="utf-8")
+
+
 def test_index_commit(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_main, "index_pending_at_head", lambda repo_root, store: 3)
     result = runner.invoke(cli_main.app, ["index-commit", "--repo", str(tmp_path)])
