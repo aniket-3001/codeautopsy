@@ -1,7 +1,7 @@
 """stdio MCP server exposing CodeAutopsy's tools. Entry point: `codeautopsy-mcp`.
 
 Wire it into an MCP client (Cursor, Claude Desktop, …) as a server whose command is
-`codeautopsy-mcp`. The agent then gets three CodeAutopsy tools on its menu — see `core.py`
+`codeautopsy-mcp`. The agent then gets four CodeAutopsy tools on its menu — see `core.py`
 for the logic each one runs.
 
 Install with the extra so the `mcp` package is present:  `pip install -e ".[mcp]"`.
@@ -49,6 +49,17 @@ def build_server() -> Any:
         return core.prognose(code, reasoning)
 
     @server.tool()
+    def postmortem(commit_sha: str, file_path: str, line: int) -> dict[str, Any]:
+        """Render the full chain-of-custody postmortem for a crash as shareable markdown.
+
+        Assembles the same document `codeautopsy report` prints on the CLI: crash -> cause of
+        death -> blame -> decision -> reasoning -> confidence -> lesson learned (if this class
+        of bug has struck before). Useful when asked to write an incident summary or a PR
+        description for a fix.
+        """
+        return core.postmortem(commit_sha, file_path, line)
+
+    @server.tool()
     def leaderboard() -> dict[str, Any]:
         """Rank the AI tools/models used in this project by real production crash rate.
 
@@ -64,11 +75,11 @@ def run() -> None:  # pragma: no cover
     """Run the server over stdio (the transport MCP clients launch).
 
     Bootstraps a real TracerProvider here — not at module import time, so importing this
-    module for `build_server()` alone (as `test_server_registers_three_tools` does) stays
+    module for `build_server()` alone (as `test_server_registers_four_tools` does) stays
     free of OTel side effects, matching the "importing this module stays cheap" contract
-    documented above. Every call an MCP client makes into `autopsy`/`prognose`/`leaderboard`
-    (`codeautopsy/mcp/core.py`) is now itself a span in the same SigNoz pipeline the rest of
-    CodeAutopsy exports to.
+    documented above. Every call an MCP client makes into
+    `autopsy`/`prognose`/`postmortem`/`leaderboard` (`codeautopsy/mcp/core.py`) is now itself a
+    span in the same SigNoz pipeline the rest of CodeAutopsy exports to.
 
     Not unit-tested: this blocks on the real stdio transport, which only makes sense under
     an actual MCP client. `build_server()`'s tool wiring is covered directly (see test_mcp.py).

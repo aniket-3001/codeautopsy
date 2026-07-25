@@ -15,6 +15,9 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Status, StatusCode
 
 from codeautopsy.config import Settings, get_settings
+from codeautopsy.fixbot.core import build_genealogy
+from codeautopsy.fixbot.lessons import recall_lesson
+from codeautopsy.postmortem.core import render_postmortem
 from codeautopsy.provenance.indexer import resolve as resolve_provenance
 from codeautopsy.provenance.models import ResolveRequest, ResolveResponse
 from codeautopsy.provenance.store import ProvenanceStoreProtocol, make_store
@@ -119,6 +122,50 @@ def prognose(
             result = score_snippet(store, code, reasoning, org_id=org_id).model_dump()
             span.set_attribute("codeautopsy.mcp.verdict", result["verdict"])
             return result
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            raise
+
+
+def postmortem(
+    commit_sha: str,
+    file_path: str,
+    line: int,
+    *,
+    org_id: str = "demo-public",
+    store: ProvenanceStoreProtocol | None = None,
+    settings: Settings | None = None,
+    tracer_provider: TracerProvider | None = None,
+) -> dict[str, Any]:
+    """Render the full chain-of-custody postmortem for a crash, as shareable markdown.
+
+    The same assembly `codeautopsy report` prints on the CLI: crash -> cause of death ->
+    blame -> decision -> reasoning -> confidence -> lesson learned (if this class of bug has
+    struck before) — everything CodeAutopsy knows about the incident, in one document an agent
+    can paste straight into a PR description or incident channel.
+    """
+    tracer = trace.get_tracer(_tracer_name, tracer_provider=tracer_provider)
+    with tracer.start_as_current_span("codeautopsy.mcp.postmortem") as span:
+        span.set_attribute("code.filepath", file_path)
+        span.set_attribute("code.lineno", line)
+        span.set_attribute("codeautopsy.commit_sha", commit_sha[:12])
+        try:
+            settings = settings or get_settings()
+            store = store or make_store(settings)
+            genealogy = build_genealogy(settings, commit_sha, file_path, line)
+            lesson_hit = recall_lesson(
+                store,
+                cause_of_death=genealogy.cause_of_death,
+                file_path=file_path,
+                risk_flags=genealogy.risk_flags,
+                org_id=org_id,
+            )
+            markdown = render_postmortem(
+                genealogy, lesson=lesson_hit, ci_run_url=settings.ci_run_url
+            )
+            span.set_attribute("codeautopsy.mcp.lesson_recalled", lesson_hit is not None)
+            return {"markdown": markdown}
         except Exception as exc:
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))

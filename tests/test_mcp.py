@@ -2,13 +2,14 @@
 
 These exercise the pure tool functions directly with an in-memory-ish SQLite store, so they
 need neither the `mcp` package's transport nor a network hop. A separate test confirms the
-FastMCP server wires the three tools up when the `mcp` package is present.
+FastMCP server wires the four tools up when the `mcp` package is present.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import tempfile
+from pathlib import Path
 
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
@@ -17,8 +18,11 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import StatusCode
 
 from codeautopsy.config import Settings
+from codeautopsy.enricher.incidents import append_incident
+from codeautopsy.fixbot import core as fixbot_core
+from codeautopsy.fixbot.lessons import record_lesson
 from codeautopsy.mcp import core
-from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord
+from codeautopsy.provenance.models import IncidentRecord, ProvenanceRecord, ResolveResponse
 from codeautopsy.provenance.store import ProvenanceStore
 
 _HAS_MCP = importlib.util.find_spec("mcp") is not None
@@ -38,6 +42,10 @@ def _memory_provider() -> tuple[TracerProvider, InMemorySpanExporter]:
 
 def _settings() -> Settings:
     return Settings()
+
+
+def _settings_for_repo(repo: Path) -> Settings:
+    return Settings(CODEAUTOPSY_TARGET_REPO=str(repo))
 
 
 def _record(**over) -> ProvenanceRecord:
@@ -134,6 +142,79 @@ def test_leaderboard_ranks_tools(store: ProvenanceStore) -> None:
     assert out["total_incidents"] == 1
     assert out["scores"], "expected at least one ranked tool/model"
     assert out["scores"][0]["tool"] == "claude-code"
+
+
+def test_postmortem_renders_full_case_file_with_lesson(
+    store: ProvenanceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path
+    (repo / "app").mkdir()
+    (repo / "app" / "payment.py").write_text(
+        "def checkout(request):\n    return int(request.args['code'])\n", encoding="utf-8"
+    )
+    rec = _record()
+    monkeypatch.setattr(
+        fixbot_core,
+        "resolve_decision",
+        lambda *a, **k: ResolveResponse(
+            resolved=True,
+            introducing_commit="abc123def456",
+            record=rec,
+            confidence=1.0,
+            confidence_factors={"label": "high", "match": "exact-commit"},
+        ),
+    )
+    append_incident(
+        repo,
+        {
+            "file_path": "app/payment.py",
+            "line": 42,
+            "exc_type": "ValueError",
+            "exc_message": "invalid literal for int() with base 10: 'GIMME50'",
+            "cause_of_death": "invalid value — unvalidated input",
+            "resolved": True,
+            "decision_id": "dec_abc",
+        },
+    )
+    record_lesson(
+        store,
+        lesson="always validate external input before int()",
+        cause_of_death="invalid value — unvalidated input",
+        file_path="app/payment.py",
+        risk_flags=["unvalidated-input"],
+        decision_id="dec_abc",
+        patch_summary="wrapped in try/except, defaults to 0",
+    )
+
+    out = core.postmortem(
+        "abc123def456", "app/payment.py", 42, store=store, settings=_settings_for_repo(repo)
+    )
+
+    markdown = out["markdown"]
+    assert "app/payment.py:42" in markdown
+    assert "cast the discount code straight to int" in markdown
+    assert "always validate external input before int()" in markdown
+    assert "Seen **1x**" in markdown
+
+
+def test_postmortem_renders_when_unresolved_and_no_lesson(
+    store: ProvenanceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path
+    (repo / "other.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        fixbot_core,
+        "resolve_decision",
+        lambda *a, **k: ResolveResponse(resolved=False, detail="no matching decision indexed"),
+    )
+
+    out = core.postmortem(
+        "deadbeef", "other.py", 9, store=store, settings=_settings_for_repo(repo)
+    )
+
+    markdown = out["markdown"]
+    assert "No decision indexed for this line" in markdown
+    assert "No lesson recorded yet for this class of bug" in markdown
 
 
 def test_autopsy_span_records_resolved_without_error_status(store: ProvenanceStore) -> None:
@@ -275,14 +356,65 @@ def test_leaderboard_span_records_totals(store: ProvenanceStore) -> None:
     assert span.attributes["codeautopsy.mcp.total_incidents"] == 1
 
 
+def test_postmortem_span_records_success(
+    store: ProvenanceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "other.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        fixbot_core, "resolve_decision", lambda *a, **k: ResolveResponse(resolved=False)
+    )
+    provider, exporter = _memory_provider()
+
+    core.postmortem(
+        "deadbeef",
+        "other.py",
+        9,
+        store=store,
+        settings=_settings_for_repo(tmp_path),
+        tracer_provider=provider,
+    )
+
+    span = exporter.get_finished_spans()[0]
+    assert span.name == "codeautopsy.mcp.postmortem"
+    assert span.attributes["code.filepath"] == "other.py"
+    assert span.attributes["codeautopsy.mcp.lesson_recalled"] is False
+    assert span.status.status_code != StatusCode.ERROR
+
+
+def test_postmortem_span_records_exception_and_reraises(
+    store: ProvenanceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        fixbot_core,
+        "resolve_decision",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("git blame blew up")),
+    )
+    (tmp_path / "other.py").write_text("x = 1\n", encoding="utf-8")
+    provider, exporter = _memory_provider()
+
+    with pytest.raises(RuntimeError, match="git blame blew up"):
+        core.postmortem(
+            "deadbeef",
+            "other.py",
+            9,
+            store=store,
+            settings=_settings_for_repo(tmp_path),
+            tracer_provider=provider,
+        )
+
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code == StatusCode.ERROR
+    assert span.events[0].name == "exception"
+
+
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")
-def test_server_registers_three_tools() -> None:
+def test_server_registers_four_tools() -> None:
     from codeautopsy.mcp.server import build_server
 
     server = build_server()
     # FastMCP exposes registered tools asynchronously; the manager holds them synchronously.
     names = set(server._tool_manager._tools.keys())  # noqa: SLF001
-    assert {"autopsy", "prognose", "leaderboard"} <= names
+    assert {"autopsy", "prognose", "postmortem", "leaderboard"} <= names
 
 
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")
@@ -313,3 +445,34 @@ def test_server_tool_wrappers_call_through_to_core(
 
     leaderboard_out = tools["leaderboard"].fn()
     assert leaderboard_out["total_decisions"] == 1
+
+
+@pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")
+def test_server_postmortem_tool_wrapper_calls_through_to_core(
+    store: ProvenanceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`postmortem` needs a real file on disk (`build_genealogy` reads it), so it gets its own
+    test with `target_repo` pointed at a temp dir, rather than sharing the fixture-repo-root
+    settings the other three wrappers use above.
+    """
+    from codeautopsy.mcp.server import build_server
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "payment.py").write_text(
+        "def checkout(request):\n    return int(request.args['code'])\n", encoding="utf-8"
+    )
+    rec = _record()
+    monkeypatch.setattr(
+        fixbot_core,
+        "resolve_decision",
+        lambda *a, **k: ResolveResponse(resolved=True, introducing_commit="abc123def456", record=rec),
+    )
+    monkeypatch.setattr(core, "get_settings", lambda: _settings_for_repo(tmp_path))
+    monkeypatch.setattr(core, "make_store", lambda settings: store)
+
+    server = build_server()
+    tools = server._tool_manager._tools  # noqa: SLF001
+
+    out = tools["postmortem"].fn(commit_sha="abc123def456", file_path="app/payment.py", line=42)
+
+    assert "cast the discount code straight to int" in out["markdown"]
