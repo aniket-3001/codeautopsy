@@ -30,3 +30,8 @@ accounts.db
 Thumbs.db
 .idea/
 .vscode/
+
+# Frontend test tooling (Playwright)
+node_modules/
+playwright-report/
+test-results/

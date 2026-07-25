@@ -1,0 +1,14 @@
+{
+  "name": "codeautopsy-frontend-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright browser tests for the static docs/ frontend (dashboard SPA, sandbox demo, landing page).",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

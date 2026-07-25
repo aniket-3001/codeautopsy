@@ -163,7 +163,9 @@ GitHub Actions (`.github/workflows/`):
 - **`ci.yml`** — on every push/PR to `main`: editable install, `ruff check`, `mypy`, `pytest`
   with coverage (`fail_under = 95`, see `pyproject.toml`), coverage XML uploaded as an artifact.
   Runs a `postgres:16` service container so `tests/test_provenance_postgres.py` exercises the
-  real Postgres backend (skipped locally when `DATABASE_URL` isn't set).
+  real Postgres backend (skipped locally when `DATABASE_URL` isn't set). A second `frontend` job
+  runs the Playwright suite (see [Frontend tests](#frontend-tests) below) against the real
+  `docs/*.html` files with the backend mocked.
 - **`docker-publish.yml`** — on push to `main` (or manual dispatch): builds the image and
   publishes it to GHCR (`ghcr.io/<owner>/<repo>`), tagged by commit SHA and `latest`.
 - **`pages.yml`** — on push to `main` touching `docs/`: deploys `docs/index.html` to GitHub
@@ -171,6 +173,28 @@ GitHub Actions (`.github/workflows/`):
 - **`deploy-cloud-run.yml`** — on push to `main` (or manual dispatch): builds the image, pushes
   it to Artifact Registry, and redeploys both Cloud Run services. Authenticates via Workload
   Identity Federation (no long-lived key stored in GitHub).
+
+## Frontend tests
+
+`docs/` is deliberately build-step-free — static HTML with inline vanilla JS, deployed as-is to
+GitHub Pages. Test coverage (`e2e/`) uses [Playwright](https://playwright.dev) to drive the real
+`docs/app.html`, `docs/demo.html`, and `docs/index.html` files unmodified in a real browser, with
+`fetch()` calls to the Cloud Run API intercepted and mocked (`e2e/fixtures.js`) — no live backend
+needed. It covers the router's auth-gated redirects, the auth/signup/login/logout flow, dashboard
+rendering + filtering + incident modal, the Live Autopsy playground, Risk Gate, Prognosis, the
+Leaderboard, Settings/API keys, the Integrate snippets, and the sandbox demo's 3-step crash loop —
+plus a regression test that the Auto-Heal poll loop actually stops when you navigate away from
+`#/autoheal` (`stopHealPoll()`).
+
+```bash
+npm install
+npx playwright install --with-deps chromium   # first run only
+npm run test:e2e                              # headless
+npm run test:e2e:ui                           # interactive UI mode
+```
+
+Runs on every push/PR via the `frontend` job in `ci.yml`. Nothing under `e2e/`,
+`package.json`, or `playwright.config.js` is published — GitHub Pages only ships `docs/`.
 
 ## Deployment
 
