@@ -1,20 +1,20 @@
 # Next steps / pending tasks
 
-Working notes to resume from — last updated after commit `0233832` (main, pushed, CI green).
+Working notes to resume from — last updated after commit `1a7066f` (main, pushed, CI green).
 If you're picking this back up cold: read the "What's solid" section first so you don't
 re-verify work that's already done, then work top-down through "Pending."
 
 ## Pending — needs your action (I can't do these myself)
 
-1. **Verify the distributed trace in SigNoz console.** This is the one open item from the
-   last thing we shipped. Search Traces for `87db351fbc5cece02545065ea05f09c0` (or just the
-   most recent trace on `checkout-api`). Before the last commit, this would've shown as two
-   *disconnected* traces (the crash span, and a separate unrelated trace for the provenance
-   service's own `/resolve` handling). It should now show as **one continuous waterfall**:
-   `parse_discount` → the HTTP call → `codeautopsy-provenance`'s `POST /resolve` span, all
-   under the same trace ID. I verified the propagation mechanism itself works correctly (real
-   local-HTTP-server test, not a fake), and the deploy succeeded — this is just the visual
-   confirmation in the console that only you can do.
+1. **Verify the distributed trace in SigNoz console.** Still the one open item — I don't have
+   console access to confirm this myself. Search Traces for `87db351fbc5cece02545065ea05f09c0`
+   (or just the most recent trace on `checkout-api`). Before that commit, this would've shown
+   as two *disconnected* traces (the crash span, and a separate unrelated trace for the
+   provenance service's own `/resolve` handling). It should now show as **one continuous
+   waterfall**: `parse_discount` → the HTTP call → `codeautopsy-provenance`'s `POST /resolve`
+   span, all under the same trace ID. I verified the propagation mechanism itself works
+   correctly (real local-HTTP-server test, not a fake) and the deploy succeeded — this is just
+   the visual confirmation in the console that only you can do.
 
 2. **Decide on 5 leftover screenshot files**, not part of the repo:
    `D:\Aniket\SigNoz Hackathon\image.png`, `image copy.png`, `image copy 2.png`,
@@ -23,12 +23,9 @@ re-verify work that's already done, then work top-down through "Pending."
 
 ## Deferred, deliberately — from `docs/dev/roadmap.md`
 
-Full reasoning is in that file. Quick recap of what's *not* built and why:
+Full reasoning is in that file. **Postmortem case-file generator is now built** — see below.
+Quick recap of what's still *not* built and why:
 
-- **Postmortem case-file generator** (`codeautopsy report <trace>` → shareable markdown
-  postmortem). Safe, cheap, all the data already exists (confidence scoring, decision,
-  reasoning, lesson). Lowest-risk thing left on the list if there's time — least
-  differentiating of the remaining ideas, but a nice demoable artifact.
 - **Fix efficacy tracking** (mark a lesson "confirmed in prod" / "refuted" after a fix
   merges). Real design complexity (what actually triggers the check — a background job? a
   time window?) and doesn't demo well live since it depends on time passing after a merge.
@@ -80,8 +77,18 @@ looks right") and is pushed to `main`:
 - **A full line-by-line review** of everything above was done separately (see conversation —
   not captured in a file), including a direct `gcloud` inspection of both deployed services'
   env vars. No code bugs found; only 3 stale-documentation numbers, all fixed.
+- **Distributed tracing** — `HTTPXClientInstrumentor` on both services, so the enricher's HTTP
+  call to the provenance service propagates trace context. Caught and fixed a real dependency
+  conflict along the way (an unpinned install silently pulled an incompatible OTel version —
+  pinned to the exact compatible one, `pip check` clean). Verified the propagation mechanism
+  itself with a real local HTTP server, after confirming `httpx.MockTransport` silently
+  bypasses the instrumented layer (would have been a false-passing test).
+- **Postmortem case-file generator** (`codeautopsy report <commit> <file> <line>`) — manually
+  verified end-to-end against a real local provenance service with a seeded decision, incident,
+  and lesson (not just mocked unit tests) before writing the automated tests; both the render
+  function and the CLI command are at 100% coverage.
 
-Current test count: 258 Python + 30 Playwright = 288, ≥95% coverage gate enforced in CI,
+Current test count: 266 Python + 30 Playwright = 296, ≥95% coverage gate enforced in CI,
 ruff + mypy clean.
 
 ## Reference
