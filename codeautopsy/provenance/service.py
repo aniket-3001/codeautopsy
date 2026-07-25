@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from codeautopsy.accounts.auth import make_require_api_key, make_require_user
 from codeautopsy.accounts.models import (
@@ -80,6 +81,12 @@ incidents_counter = _meter.create_counter(
     unit="1",
     description="Crash resolutions processed by /resolve and /v1/resolve, tagged by outcome.",
 )
+
+# Global, not per-app-instance (unlike FastAPIInstrumentor below): propagates trace context on
+# any outbound httpx call this process makes — e.g. autoheal/core.py's GitHub API calls — and
+# is idempotent, so calling it once here (rather than inside create_app(), which tests call
+# dozens of times) is both correct and sufficient.
+HTTPXClientInstrumentor().instrument()
 
 
 def _make_store(settings: Settings) -> ProvenanceStoreProtocol:

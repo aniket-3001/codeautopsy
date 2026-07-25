@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
 from opentelemetry._logs import set_logger_provider
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.trace import Status, StatusCode
 
 from codeautopsy.config import get_settings
@@ -103,6 +104,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 FastAPIInstrumentor.instrument_app(app)
+
+# So resolve_decision()'s call to the provenance service propagates the crash span's trace
+# context (W3C traceparent) — without this, the two services would produce two disconnected
+# traces instead of one connected distributed trace, even though they're causally linked by
+# that exact HTTP call.
+HTTPXClientInstrumentor().instrument()
 
 # Crude in-process blast-radius counter: how many times has THIS line crashed this run?
 _crash_counts: collections.Counter = collections.Counter()

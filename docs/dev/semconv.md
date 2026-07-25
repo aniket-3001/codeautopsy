@@ -17,6 +17,14 @@ The autopsy span carries an OpenTelemetry **`Link`** to the decision span (`link
 which is the join that lets `codeautopsy autopsy <trace>` walk from a crash back to the AI decision
 that authored the crashing line.
 
+That `Link` is a deliberate, explicit jump across two otherwise-unrelated traces — it's the core
+thesis. It's distinct from **propagation**: `HTTPXClientInstrumentor` (both services, see
+`docs/dev/operations.md`) makes the enricher's own HTTP call to the provenance service carry a
+`traceparent` header, so *that* hop stays in the *same* trace as the crash span, the ordinary way
+two services in one distributed trace do. Two different mechanisms for two different kinds of
+connection: a Link jumps across dev-time/runtime; propagation keeps one causally-connected
+runtime call in one trace.
+
 ---
 
 ## Decision span — `agent.tool.<tool>` (recorder)

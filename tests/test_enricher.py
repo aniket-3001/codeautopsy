@@ -6,10 +6,14 @@ fast, deterministic regression guard on the core mechanism: crash -> resolve -> 
 
 from __future__ import annotations
 
+import http.server
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
 from opentelemetry._logs import SeverityNumber
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
 from opentelemetry.sdk.trace import TracerProvider
@@ -44,6 +48,36 @@ def _memory_log_provider() -> tuple[LoggerProvider, InMemoryLogRecordExporter]:
     provider = LoggerProvider()
     provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
     return provider, exporter
+
+
+@contextmanager
+def _local_server(captured_headers: dict):
+    """A real local HTTP server — not httpx.MockTransport, which bypasses the instrumented
+    transport layer entirely and so would never see an injected traceparent header. Only a
+    request that actually goes through httpx's real HTTPTransport exercises the
+    HTTPXClientInstrumentor patch, which is what this test needs to prove."""
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            captured_headers.update(dict(self.headers.items()))
+            body = b'{"resolved": false, "detail": "n/a"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:  # silence default request logging
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_port
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
 
 
 def _record(**overrides) -> ProvenanceRecord:
@@ -419,6 +453,31 @@ def test_resolve_decision_carries_ci_run_url_from_settings(monkeypatch):
     assert captured["json"]["ci_run_url"] == (
         "https://github.com/aniket-3001/codeautopsy/actions/runs/123"
     )
+
+
+def test_resolve_decision_propagates_trace_context_to_the_provenance_service():
+    """The crash span and the provenance service's own request-handling span are causally
+    linked by this exact HTTP call — without trace-context propagation they'd show up in
+    SigNoz as two disconnected traces instead of one connected distributed trace. Verified
+    against a real local HTTP server, not httpx.MockTransport (see _local_server's docstring
+    for why that wouldn't actually prove anything)."""
+    HTTPXClientInstrumentor().instrument()  # idempotent — sample_app/service.py already do this
+    captured: dict = {}
+
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    with _local_server(captured) as port:
+        settings = Settings(CODEAUTOPSY_PROVENANCE_URL=f"http://127.0.0.1:{port}")
+        with tracer.start_as_current_span("crash-span") as span:
+            resolve_decision(settings, "abc123", "f.py", 1)
+            expected_trace_id = format(span.get_span_context().trace_id, "032x")
+
+    assert "traceparent" in captured
+    # traceparent format: 00-<32 hex trace id>-<16 hex span id>-<flags>
+    assert captured["traceparent"].split("-")[1] == expected_trace_id
 
 
 def test_resolve_decision_uses_public_endpoint_without_api_key(monkeypatch):

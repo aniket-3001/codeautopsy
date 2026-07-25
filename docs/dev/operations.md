@@ -42,7 +42,7 @@ snippet.
 ## Test / lint / type-check (the gate)
 
 ```bash
-pytest -q                        # 257 tests; 10 skip locally (need a live Postgres)
+pytest -q                        # 258 tests; 10 skip locally (need a live Postgres)
 ruff check codeautopsy/          # lint
 mypy codeautopsy/                # types
 ```
@@ -169,7 +169,10 @@ git push origin v0.1.1
 
 Both services set a real `TracerProvider`/`MeterProvider` at import time (`codeautopsy/otel.py`)
 and are wrapped in `FastAPIInstrumentor` — every request is a trace. The sample app additionally
-sets a `LoggerProvider` so the enricher's reasoning log actually ships.
+sets a `LoggerProvider` so the enricher's reasoning log actually ships. Both also run
+`HTTPXClientInstrumentor().instrument()` so any outbound `httpx` call — the enricher's
+`resolve_decision()` HTTP call to the provenance service, `autoheal/core.py`'s GitHub API calls —
+propagates W3C `traceparent` context, connecting what would otherwise be disconnected traces.
 
 | Signal | Name | Service | Emitted by |
 |---|---|---|---|

@@ -47,11 +47,14 @@ does a distinct, load-bearing job in the product — not a checkbox integration:
 |---|---|---|
 | **Traces + span links** | `codeautopsy/enricher/core.py` (`codeautopsy.autopsy` span) | The core thesis: an OTel span link jumps a runtime crash trace to the dev-time decision trace that authored the crashing line. Validated on real SigNoz Cloud infra (`scripts/day0_smoke.py`). Every such span also carries `deployment.ci_run_url` — the GitHub Actions run that built and deployed the crashing revision — extending the chain one hop past the commit: *reasoning → commit → CI run → deployed revision*. |
 | **Custom metrics** | `codeautopsy.crashes` (`sample_app/main.py`), `codeautopsy.decisions.indexed` + `codeautopsy.incidents` (`provenance/service.py`) | `codeautopsy.crashes` is what the Auto-Heal alert rule watches. The two provenance-service counters make ingest volume and resolution outcome queryable independent of any single trace. |
-| **Logs, trace-correlated** | `enricher/core.py::_emit_autopsy_log` | The AI's own reasoning is emitted as a log record carrying the *same* trace/span id as the autopsy span — so "why did this crash" is filterable as a SigNoz log line, not something you have to open a trace to read. |
+| **Logs, trace-correlated** | `enricher/core.py::_emit_autopsy_log` | The AI's own reasoning is emitted as a log record carrying the *same* trace/span id as the autopsy span — so "why did this crash" is filterable as a SigNoz log line, not something you have to open a trace to read, and SigNoz's own trace-to-correlated-logs jump works on it for free. |
 | **Alerts → webhook** | Alert rule on `codeautopsy.crashes` → `POST /v1/heal/webhook` (see `docs/dev/operations.md`) | Closes the Auto-Heal loop (L4): a real SigNoz alert — not a poller — is what triggers the Fix Bot with zero human in the loop. |
 | **Dashboards** | [`dashboards/codeautopsy-blast-radius.json`](dashboards/codeautopsy-blast-radius.json) — 8 panels across traces, spanning overview stats, time series, a risk-flag leaderboard, and a live unresolved-crash queue | One click from the web app (`Blast Radius in SigNoz 🔍`) into a dashboard built entirely from `codeautopsy.autopsy` span attributes. |
 | **MCP — emitting, not just consuming** | `codeautopsy/mcp/server.py` | The inverse of "agent queries SigNoz's MCP server": CodeAutopsy *is* an MCP server, exposing `autopsy`/`prognose`/`leaderboard` as agent-callable tools over the provenance index SigNoz's own MCP server has no way to know about. |
 | **Both services traced** | `sample_app/main.py` **and** `provenance/service.py` (`FastAPIInstrumentor`) | The dashboard/API backend isn't a silent, unobserved control plane — it's a first-class instrumented service in the same SigNoz Cloud tenant as the sample app. |
+| **Distributed tracing** | `HTTPXClientInstrumentor` (both services) | The enricher's HTTP call from `checkout-api` to `codeautopsy-provenance` propagates W3C `traceparent` context — SigNoz sees one connected distributed trace (`parse_discount` → HTTP call → the provenance service's own `/resolve` span) instead of two unrelated ones, on top of the explicit span *link* the core thesis already relies on. |
+| **Service Map / APM** | Free from `FastAPIInstrumentor` on both services | p50/p99 latency, error rate, and request rate per service and per route — no extra code, a byproduct of the tracing above. |
+| **Exceptions explorer** | `span.record_exception(exc)` (`sample_app/main.py`) | Every seeded-bug crash is already grouped, deduplicated, and time-bucketed in SigNoz's own exception view. |
 
 Every service exports to a **real, hosted SigNoz Cloud tenant** (`in2` region), not a local
 ephemeral container spun up for the demo — the telemetry above is what's actually live in
@@ -71,7 +74,7 @@ production right now.
 - ✅ Fix Bot — `codeautopsy fix <commit> <file> <line>`: feeds the agent its own genealogy,
   verifies the patch with a real regression test before committing anything, opens a PR via
   `gh` with `--push`.
-- ✅ 285+ tests (257 Python + 30 Playwright frontend), ≥95% coverage gate enforced in CI
+- ✅ 288 tests (258 Python + 30 Playwright frontend), ≥95% coverage gate enforced in CI
   (`ruff check` + `mypy` + `pytest` clean).
 - ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test (backend
   *and* frontend) on every push, image published to GHCR on `main`, landing page deployed via
