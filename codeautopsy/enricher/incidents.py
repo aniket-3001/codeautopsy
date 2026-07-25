@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from codeautopsy.provenance.models import ProvenanceRecord
 
@@ -24,16 +25,16 @@ def incidents_path(repo_root: Path) -> Path:
     return _codeautopsy_dir(repo_root) / "incidents.jsonl"
 
 
-def append_incident(repo_root: Path, record: dict) -> None:
+def append_incident(repo_root: Path, record: dict[str, Any]) -> None:
     with incidents_path(repo_root).open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
 
 
-def read_incidents(repo_root: Path) -> list[dict]:
+def read_incidents(repo_root: Path) -> list[dict[str, Any]]:
     path = incidents_path(repo_root)
     if not path.exists():
         return []
-    records = []
+    records: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
@@ -41,7 +42,7 @@ def read_incidents(repo_root: Path) -> list[dict]:
     return records
 
 
-def latest_incident_for(repo_root: Path, file_path: str, line: int) -> dict | None:
+def latest_incident_for(repo_root: Path, file_path: str, line: int) -> dict[str, Any] | None:
     """Most recent incident whose crash line falls within this file, closest first.
 
     Exact line match is preferred; if the crash line was reported slightly differently
@@ -64,7 +65,7 @@ def record_incident(
     cause_of_death: str,
     resolved: bool,
     provenance: ProvenanceRecord | None,
-    context: dict | None,
+    context: dict[str, Any] | None,
     blast_radius: int,
 ) -> None:
     """Best-effort incident append. Must never raise — called from a live exception path."""

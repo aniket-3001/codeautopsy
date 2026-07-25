@@ -30,7 +30,9 @@ def force_utf8_stdout() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
-def _resource(service_name: str, service_version: str, extra: dict | None = None) -> Resource:
+def _resource(
+    service_name: str, service_version: str, extra: dict[str, str] | None = None
+) -> Resource:
     attrs = {
         "service.name": service_name,
         "service.version": service_version,
@@ -43,7 +45,7 @@ def _resource(service_name: str, service_version: str, extra: dict | None = None
 def build_tracer_provider(
     service_name: str,
     service_version: str = "0.1.0",
-    resource_attrs: dict | None = None,
+    resource_attrs: dict[str, str] | None = None,
     settings: Settings | None = None,
 ) -> TracerProvider:
     """A TracerProvider that exports over OTLP/HTTP to SigNoz, with Cloud auth headers."""
@@ -60,7 +62,7 @@ def build_tracer_provider(
 def build_logger_provider(
     service_name: str,
     service_version: str = "0.1.0",
-    resource_attrs: dict | None = None,
+    resource_attrs: dict[str, str] | None = None,
     settings: Settings | None = None,
 ) -> LoggerProvider:
     """A LoggerProvider so agent reasoning transcripts land as trace-correlated logs."""
@@ -77,7 +79,7 @@ def build_logger_provider(
 def build_meter_provider(
     service_name: str,
     service_version: str = "0.1.0",
-    resource_attrs: dict | None = None,
+    resource_attrs: dict[str, str] | None = None,
     settings: Settings | None = None,
     export_interval_ms: int = 10000,
 ) -> MeterProvider:

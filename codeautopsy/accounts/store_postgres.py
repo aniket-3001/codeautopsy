@@ -171,5 +171,5 @@ class PostgresAccountStore:
                     conn.execute(
                         "UPDATE api_keys SET last_used_at = %s WHERE id = %s", (_now(), row[0])
                     )
-                    return row[1]
+                    return str(row[1])
         return None

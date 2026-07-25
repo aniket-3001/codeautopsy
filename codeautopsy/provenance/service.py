@@ -7,6 +7,7 @@ decision that authored that line, which it then attaches to the autopsy span as 
 from __future__ import annotations
 
 from hmac import compare_digest
+from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -15,7 +16,7 @@ from opentelemetry import metrics, trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-from codeautopsy.accounts.auth import make_require_api_key, make_require_user
+from codeautopsy.accounts.auth import AuthContext, make_require_api_key, make_require_user
 from codeautopsy.accounts.models import (
     ApiKeyPublic,
     CreateApiKeyResponse,
@@ -121,18 +122,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     FastAPIInstrumentor.instrument_app(app)
 
     @app.get("/health")
-    def health() -> dict:
+    def health() -> dict[str, Any]:
         db = "postgres" if settings.database_url else str(settings.provenance_db)
         return {"status": "ok", "records": store.count(), "db": db}
 
     @app.post("/provenance", status_code=201)
-    def add(record: ProvenanceRecord) -> dict:
+    def add(record: ProvenanceRecord) -> dict[str, Any]:
         store.add(record)
         decisions_indexed_counter.add(1, {"endpoint": "public"})
         return {"added": True, "records": store.count()}
 
     @app.post("/provenance/bulk", status_code=201)
-    def add_bulk(records: list[ProvenanceRecord]) -> dict:
+    def add_bulk(records: list[ProvenanceRecord]) -> dict[str, Any]:
         n = store.add_many(records)
         decisions_indexed_counter.add(n, {"endpoint": "public_bulk"})
         return {"added": n, "records": store.count()}
@@ -142,7 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return store.all()
 
     @app.delete("/provenance/{decision_id}")
-    def delete(decision_id: str) -> dict:
+    def delete(decision_id: str) -> dict[str, Any]:
         # Scoped by decision_id (not commit/file/line) so removing one demo submission can
         # never delete someone else's real record for the same crashing line.
         deleted = store.delete(decision_id)
@@ -183,27 +184,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return TokenResponse(access_token=token, org_id=org.id)
 
     @app.get("/v1/me", response_model=MeResponse)
-    def v1_me(ctx=Depends(require_user)) -> MeResponse:
+    def v1_me(ctx: AuthContext = Depends(require_user)) -> MeResponse:
         org = accounts.get_org_by_id(ctx.org_id)
         if org is None:
             raise HTTPException(status_code=500, detail="org not found")
         return MeResponse(user=ctx.user, org=org)
 
     @app.post("/v1/keys", response_model=CreateApiKeyResponse, status_code=201)
-    def v1_create_key(ctx=Depends(require_user)) -> CreateApiKeyResponse:
+    def v1_create_key(ctx: AuthContext = Depends(require_user)) -> CreateApiKeyResponse:
         return accounts.create_api_key(ctx.org_id)
 
     @app.get("/v1/keys", response_model=list[ApiKeyPublic])
-    def v1_list_keys(ctx=Depends(require_user)) -> list[ApiKeyPublic]:
+    def v1_list_keys(ctx: AuthContext = Depends(require_user)) -> list[ApiKeyPublic]:
         return accounts.list_api_keys(ctx.org_id)
 
     @app.delete("/v1/keys/{key_id}")
-    def v1_revoke_key(key_id: str, ctx=Depends(require_user)) -> dict:
+    def v1_revoke_key(key_id: str, ctx: AuthContext = Depends(require_user)) -> dict[str, Any]:
         revoked = accounts.revoke_api_key(ctx.org_id, key_id)
         return {"revoked": revoked}
 
     @app.post("/v1/provenance", status_code=201)
-    def v1_add(record: ProvenanceRecord, org_id: str = Depends(require_api_key)) -> dict:
+    def v1_add(
+        record: ProvenanceRecord, org_id: str = Depends(require_api_key)
+    ) -> dict[str, Any]:
         # Never trust org_id from the request body — always the authenticated key's org.
         record.org_id = org_id
         store.add(record)
@@ -213,7 +216,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/v1/provenance/bulk", status_code=201)
     def v1_add_bulk(
         records: list[ProvenanceRecord], org_id: str = Depends(require_api_key)
-    ) -> dict:
+    ) -> dict[str, Any]:
         for r in records:
             r.org_id = org_id
         n = store.add_many(records)
@@ -243,7 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return resp
 
     @app.get("/v1/dashboard")
-    def v1_dashboard(ctx=Depends(require_user)) -> dict:
+    def v1_dashboard(ctx: AuthContext = Depends(require_user)) -> dict[str, Any]:
         decisions = store.all(org_id=ctx.org_id)
         incidents = store.list_incidents(org_id=ctx.org_id)
         return {
@@ -256,13 +259,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/v1/leaderboard", response_model=LeaderboardReport)
-    def v1_leaderboard(ctx=Depends(require_user)) -> LeaderboardReport:
+    def v1_leaderboard(ctx: AuthContext = Depends(require_user)) -> LeaderboardReport:
         # The aggregate lens: rank every AI tool/model this org has recorded by real
         # production crash rate. Pure read over the same provenance + incidents tables.
         return compute_leaderboard(store, org_id=ctx.org_id)
 
     @app.post("/v1/risk-gate", response_model=RiskGateResponse)
-    def v1_risk_gate(req: RiskGateRequest, ctx=Depends(require_user)) -> RiskGateResponse:
+    def v1_risk_gate(
+        req: RiskGateRequest, ctx: AuthContext = Depends(require_user)
+    ) -> RiskGateResponse:
         # Prognosis without a git repo: score a pasted snippet against this org's history.
         return score_snippet(store, req.code, req.reasoning, org_id=ctx.org_id)
 
@@ -275,7 +280,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid heal secret")
 
     @app.post("/v1/heal/trigger", response_model=HealRun)
-    def v1_heal_trigger(req: HealTriggerRequest, ctx=Depends(require_user)) -> HealRun:
+    def v1_heal_trigger(
+        req: HealTriggerRequest, ctx: AuthContext = Depends(require_user)
+    ) -> HealRun:
         # The dashboard button: a signed-in judge fires a heal run in their own org. Defaults
         # to the sample app's seeded bug, so one click starts the whole loop.
         return create_heal_run(
@@ -306,7 +313,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/v1/heal/runs", response_model=HealRunList)
-    def v1_heal_runs(ctx=Depends(require_user)) -> HealRunList:
+    def v1_heal_runs(ctx: AuthContext = Depends(require_user)) -> HealRunList:
         # What the #/autoheal page polls: this org's runs, newest first, with live timelines.
         return list_heal_runs(store, org_id=ctx.org_id)
 
@@ -321,7 +328,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return run
 
     @app.delete("/v1/provenance/{decision_id}")
-    def v1_delete(decision_id: str, ctx=Depends(require_user)) -> dict:
+    def v1_delete(
+        decision_id: str, ctx: AuthContext = Depends(require_user)
+    ) -> dict[str, Any]:
         deleted = store.delete(decision_id, org_id=ctx.org_id)
         return {"deleted": deleted, "records": store.count(org_id=ctx.org_id)}
 

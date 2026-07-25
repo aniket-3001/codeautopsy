@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 
 def _codeautopsy_dir(repo_root: Path) -> Path:
@@ -21,16 +22,16 @@ def pending_path(repo_root: Path) -> Path:
     return _codeautopsy_dir(repo_root) / "pending_decisions.jsonl"
 
 
-def append_pending(repo_root: Path, record: dict) -> None:
+def append_pending(repo_root: Path, record: dict[str, Any]) -> None:
     with pending_path(repo_root).open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
 
 
-def read_pending(repo_root: Path) -> list[dict]:
+def read_pending(repo_root: Path) -> list[dict[str, Any]]:
     path = pending_path(repo_root)
     if not path.exists():
         return []
-    records = []
+    records: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:

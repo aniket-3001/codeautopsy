@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -94,7 +95,7 @@ class ResolveResponse(BaseModel):
     # dict explaining why (match kind, range width, position). Populated for resolved responses
     # by the indexer; None when unresolved. See provenance/confidence.py.
     confidence: float | None = None
-    confidence_factors: dict | None = None
+    confidence_factors: dict[str, Any] | None = None
     # Populated only by autopsy_exception() — the crash span's own (trace_id, span_id),
     # hex-encoded, so a caller can deep-link straight into that trace in SigNoz.
     crash_trace_id: str | None = None

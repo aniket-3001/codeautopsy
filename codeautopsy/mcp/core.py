@@ -8,6 +8,7 @@ read the same shape.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -24,7 +25,7 @@ _tracer_name = "codeautopsy.mcp"
 
 def _autopsy_payload(
     resp: ResolveResponse, commit_sha: str, file_path: str, line: int
-) -> dict:
+) -> dict[str, Any]:
     coordinate = f"{file_path}:{line}@{commit_sha[:12]}"
     if not resp.resolved or resp.record is None:
         return {
@@ -61,7 +62,7 @@ def autopsy(
     store: ProvenanceStoreProtocol | None = None,
     settings: Settings | None = None,
     tracer_provider: TracerProvider | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Resolve a crash coordinate to the AI decision that authored the line.
 
     Blames `file_path:line` at the deployed `commit_sha` back to its introducing commit, then
@@ -107,7 +108,7 @@ def prognose(
     store: ProvenanceStoreProtocol | None = None,
     settings: Settings | None = None,
     tracer_provider: TracerProvider | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Price a snippet's risk against this project's real production crash history."""
     tracer = trace.get_tracer(_tracer_name, tracer_provider=tracer_provider)
     with tracer.start_as_current_span("codeautopsy.mcp.prognose") as span:
@@ -130,7 +131,7 @@ def leaderboard(
     store: ProvenanceStoreProtocol | None = None,
     settings: Settings | None = None,
     tracer_provider: TracerProvider | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Rank the AI tools/models used in this project by real production crash rate."""
     tracer = trace.get_tracer(_tracer_name, tracer_provider=tracer_provider)
     with tracer.start_as_current_span("codeautopsy.mcp.leaderboard") as span:

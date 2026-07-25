@@ -70,7 +70,7 @@ def format_trailers(
     return "\n".join(lines)
 
 
-def parse_trailers(message: str) -> dict:
+def parse_trailers(message: str) -> dict[str, str]:
     """Extract CodeAutopsy provenance from a commit message's trailers.
 
     Returns a dict with any of ``decision_id`` / ``traceparent`` / ``coordinate`` that are
@@ -99,7 +99,7 @@ def parse_trailers(message: str) -> dict:
     return found
 
 
-def read_commit_trailers(repo: str | Path, commit_sha: str) -> dict:
+def read_commit_trailers(repo: str | Path, commit_sha: str) -> dict[str, str]:
     """Read CodeAutopsy provenance trailers out of a single commit via git.
 
     Returns the same shape as `parse_trailers`; an empty dict if the commit has none or git

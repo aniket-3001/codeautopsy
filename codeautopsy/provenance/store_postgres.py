@@ -7,6 +7,7 @@ Selected via `DATABASE_URL`; the SQLite store remains the default for local dev 
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import psycopg
 
@@ -150,7 +151,7 @@ class PostgresProvenanceStore:
         return len(records)
 
     @staticmethod
-    def _row_to_record(row: tuple, columns: list[str]) -> ProvenanceRecord:
+    def _row_to_record(row: tuple[Any, ...], columns: list[str]) -> ProvenanceRecord:
         data = dict(zip(columns, row, strict=True))
         data["risk_flags"] = json.loads(data.get("risk_flags") or "[]")
         return ProvenanceRecord(**data)
@@ -331,7 +332,7 @@ class PostgresProvenanceStore:
         return [self._lesson_from_row(r) for r in rows]
 
     @staticmethod
-    def _lesson_from_row(row: tuple) -> LessonRecord:
+    def _lesson_from_row(row: tuple[Any, ...]) -> LessonRecord:
         return LessonRecord(
             org_id=row[0],
             fingerprint=row[1],

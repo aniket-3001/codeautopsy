@@ -222,10 +222,12 @@ class ProvenanceStore:
     def count(self, org_id: str | None = None) -> int:
         with self._conn() as conn:
             if org_id is None:
-                return conn.execute("SELECT COUNT(*) FROM provenance").fetchone()[0]
-            return conn.execute(
-                "SELECT COUNT(*) FROM provenance WHERE org_id = ?", (org_id,)
-            ).fetchone()[0]
+                return int(conn.execute("SELECT COUNT(*) FROM provenance").fetchone()[0])
+            return int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM provenance WHERE org_id = ?", (org_id,)
+                ).fetchone()[0]
+            )
 
     def delete(self, decision_id: str, org_id: str | None = None) -> int:
         with self._conn() as conn:

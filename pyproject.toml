@@ -80,6 +80,10 @@ ignore = ["B008"]
 "tests/*" = ["E501"]    # test literals (JSON fixtures, assertion strings) read better unwrapped
 "scripts/*" = ["E501"]  # standalone demo scripts — narrative print()s read better unwrapped
 
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

@@ -20,6 +20,7 @@ import ast
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.enricher.core import resolve_decision
@@ -191,7 +192,7 @@ def propose_fix(genealogy: Genealogy, settings: Settings | None = None) -> FixPr
     import groq
 
     client = groq.Groq(api_key=settings.groq_api_key)
-    messages: list[dict] = [{"role": "user", "content": _prompt(genealogy)}]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": _prompt(genealogy)}]
     last_error = ""
 
     for attempt in range(_MAX_ATTEMPTS):

@@ -203,5 +203,5 @@ class AccountStore:
                     conn.execute(
                         "UPDATE api_keys SET last_used_at = ? WHERE id = ?", (_now(), row["id"])
                     )
-                    return row["org_id"]
+                    return str(row["org_id"])
         return None

@@ -10,7 +10,7 @@ import json
 import re
 from pathlib import Path
 
-RISK_PATTERNS: dict[str, re.Pattern] = {
+RISK_PATTERNS: dict[str, re.Pattern[str]] = {
     "assumed_valid_input": re.compile(
         r"\bassum\w*\b[^.]{0,40}\b(valid|always|clean|correct)\b"
         r"|\b(valid|always|clean|correct)\b[^.]{0,40}\bassum\w*\b",

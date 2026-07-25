@@ -17,6 +17,8 @@ instead of implying every resolution is equally certain.
 
 from __future__ import annotations
 
+from typing import Any
+
 from codeautopsy.provenance.models import ResolveRequest, ResolveResponse
 
 # Where the score lands on the human-readable band.
@@ -46,7 +48,7 @@ def _label(score: float) -> str:
 
 def attribution_confidence(
     resp: ResolveResponse, req: ResolveRequest
-) -> tuple[float | None, dict | None]:
+) -> tuple[float | None, dict[str, Any] | None]:
     """Score how confidently `resp`'s decision is the author of `req`'s crashing line.
 
     Returns ``(score, factors)`` for a resolved response, or ``(None, None)`` when there is

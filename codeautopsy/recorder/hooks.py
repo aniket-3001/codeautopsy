@@ -17,6 +17,7 @@ import sys
 import time
 import traceback as tb_module
 from pathlib import Path
+from typing import Any
 
 from opentelemetry.sdk.trace import TracerProvider
 
@@ -67,8 +68,8 @@ def _relative_path(file_path: Path, repo_root: Path) -> str:
 
 
 def record_post_tool_use(
-    payload: dict, tracer_provider: TracerProvider | None = None
-) -> dict | None:
+    payload: dict[str, Any], tracer_provider: TracerProvider | None = None
+) -> dict[str, Any] | None:
     """Core logic for the PostToolUse hook. Returns the queued pending-decision dict, or
     None if the tool call wasn't one we track (or produced no usable line range).
 

@@ -10,6 +10,7 @@ import collections
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -112,11 +113,11 @@ FastAPIInstrumentor.instrument_app(app)
 HTTPXClientInstrumentor().instrument()
 
 # Crude in-process blast-radius counter: how many times has THIS line crashed this run?
-_crash_counts: collections.Counter = collections.Counter()
+_crash_counts: collections.Counter[tuple[str, int]] = collections.Counter()
 
 
 @app.get("/health")
-def health() -> dict:
+def health() -> dict[str, str]:
     return {"status": "ok", "commit": DEPLOYED_COMMIT_SHA}
 
 
@@ -131,7 +132,7 @@ def parse_discount(code: str) -> int:
 
 
 @app.post("/checkout")
-def checkout(payload: dict) -> dict:
+def checkout(payload: dict[str, Any]) -> dict[str, Any]:
     with tracer.start_as_current_span("parse_discount") as span:
         try:
             discount = parse_discount(payload.get("discount_code", ""))

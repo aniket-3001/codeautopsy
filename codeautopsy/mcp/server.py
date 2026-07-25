@@ -25,7 +25,9 @@ def build_server() -> Any:
     server = FastMCP("codeautopsy")
 
     @server.tool()
-    def autopsy(commit_sha: str, file_path: str, line: int, repo: str | None = None) -> dict:
+    def autopsy(
+        commit_sha: str, file_path: str, line: int, repo: str | None = None
+    ) -> dict[str, Any]:
         """Which AI coding decision authored a crashing line?
 
         Given a runtime crash coordinate — the deployed commit SHA, a repo-relative file path,
@@ -37,7 +39,7 @@ def build_server() -> Any:
         return core.autopsy(commit_sha, file_path, line, repo=repo)
 
     @server.tool()
-    def prognose(code: str, reasoning: str = "") -> dict:
+    def prognose(code: str, reasoning: str = "") -> dict[str, Any]:
         """Price a code snippet's risk against real production crash history.
 
         Detects risk flags in the snippet and prices each against this project's own recorded
@@ -47,7 +49,7 @@ def build_server() -> Any:
         return core.prognose(code, reasoning)
 
     @server.tool()
-    def leaderboard() -> dict:
+    def leaderboard() -> dict[str, Any]:
         """Rank the AI tools/models used in this project by real production crash rate.
 
         The retrospective scoreboard: every tool/model that has authored recorded decisions,
@@ -58,7 +60,7 @@ def build_server() -> Any:
     return server
 
 
-def run() -> None:
+def run() -> None:  # pragma: no cover
     """Run the server over stdio (the transport MCP clients launch).
 
     Bootstraps a real TracerProvider here — not at module import time, so importing this
@@ -67,6 +69,9 @@ def run() -> None:
     documented above. Every call an MCP client makes into `autopsy`/`prognose`/`leaderboard`
     (`codeautopsy/mcp/core.py`) is now itself a span in the same SigNoz pipeline the rest of
     CodeAutopsy exports to.
+
+    Not unit-tested: this blocks on the real stdio transport, which only makes sense under
+    an actual MCP client. `build_server()`'s tool wiring is covered directly (see test_mcp.py).
     """
     from opentelemetry import trace
 

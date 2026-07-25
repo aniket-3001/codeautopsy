@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import traceback
 from pathlib import Path
+from typing import Any
 
 import httpx
 from opentelemetry import trace
@@ -22,7 +23,7 @@ from opentelemetry.util.types import AnyValue
 
 from codeautopsy.config import Settings, get_settings
 from codeautopsy.enricher.incidents import record_incident
-from codeautopsy.provenance.models import ResolveRequest, ResolveResponse
+from codeautopsy.provenance.models import ProvenanceRecord, ResolveRequest, ResolveResponse
 
 CAUSE_OF_DEATH_BY_EXC: dict[str, str] = {
     "ValueError": "invalid value — unvalidated input",
@@ -97,7 +98,7 @@ def locate_crash_frame(exc: BaseException, repo_root: Path) -> tuple[str, int]:
     return Path(last.filename).name, last.lineno or 0
 
 
-def _decision_link(record) -> Link | None:
+def _decision_link(record: ProvenanceRecord) -> Link | None:
     """Build the OTel span link that jumps from this crash to the AI's decision span."""
     try:
         target = SpanContext(
@@ -180,7 +181,7 @@ def autopsy_exception(
     settings: Settings | None = None,
     tracer_provider: TracerProvider | None = None,
     logger_provider: LoggerProvider | None = None,
-    context: dict | None = None,
+    context: dict[str, Any] | None = None,
     repo_root: Path | None = None,
 ) -> ResolveResponse:
     """Called from the sample app's exception path. Mints the linked autopsy span.
