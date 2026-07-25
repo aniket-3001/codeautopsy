@@ -330,7 +330,7 @@ SigNoz.
 
 ### M7 — Hardening & scale *(roadmap slide — not built for the demo)*
 **Build:** Postgres Row-Level Security; rate limiting; audit logs; secret rotation; backups/DR;
-security review. 
+security review.
 **Done when:** isolation is enforced at the database layer (not just the app), and a security
 checklist passes.
 
