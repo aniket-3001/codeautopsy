@@ -71,7 +71,7 @@ production right now.
 - ✅ Fix Bot — `codeautopsy fix <commit> <file> <line>`: feeds the agent its own genealogy,
   verifies the patch with a real regression test before committing anything, opens a PR via
   `gh` with `--push`.
-- ✅ 270+ tests (246 Python + 30 Playwright frontend), ≥95% coverage gate enforced in CI
+- ✅ 285+ tests (257 Python + 30 Playwright frontend), ≥95% coverage gate enforced in CI
   (`ruff check` + `mypy` + `pytest` clean).
 - ✅ Dockerized (`docker compose up`) and CI/CD via GitHub Actions — lint/type/test (backend
   *and* frontend) on every push, image published to GHCR on `main`, landing page deployed via

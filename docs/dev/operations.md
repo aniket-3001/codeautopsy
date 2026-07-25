@@ -42,7 +42,7 @@ snippet.
 ## Test / lint / type-check (the gate)
 
 ```bash
-pytest -q                        # 134 passing, 10 skipped (skips need a live Postgres)
+pytest -q                        # 257 tests; 10 skip locally (need a live Postgres)
 ruff check codeautopsy/          # lint
 mypy codeautopsy/                # types
 ```

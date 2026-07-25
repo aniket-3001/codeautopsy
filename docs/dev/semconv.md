@@ -48,6 +48,7 @@ Minted on an unhandled exception, linked back to the decision span.
 | `code.filepath` | string | Crashing file. |
 | `code.lineno` | int | Crashing line. |
 | `deployment.commit.sha` | string | The deployed commit the crash happened on. |
+| `deployment.ci_run_url` | string | The GitHub Actions run that built + deployed the crashing revision. Only present when `CODEAUTOPSY_CI_RUN_URL` is configured — omitted entirely (not empty-string) outside a CI-deployed environment. |
 
 When `codeautopsy.resolved = true`, the span also carries the resolved decision:
 
@@ -62,6 +63,41 @@ When `codeautopsy.resolved = true`, the span also carries the resolved decision:
 | `codeautopsy.attribution.confidence` | double | 0–1 confidence that this decision authored the line. See [confidence](../../codeautopsy/provenance/confidence.py). |
 | `codeautopsy.attribution.label` | string | Band for the score: `high` / `medium` / `low`. |
 | `codeautopsy.attribution.match` | string | How it was matched: `exact-commit` or `git-blame`. |
+
+---
+
+## Autopsy log (enricher)
+
+Alongside the span, `_emit_autopsy_log` (`codeautopsy/enricher/core.py`) emits one trace-correlated
+log record per crash — same `trace_id`/`span_id` as the autopsy span, so it's queryable as a
+SigNoz log line (e.g. full-text search over the reasoning), not just a span attribute you have to
+open a trace to see.
+
+| Field | Value | Meaning |
+|---|---|---|
+| `severity` | `INFO` / `WARN` | `INFO` when resolved, `WARN` when no decision matched. |
+| `body` | string | Resolved: `"autopsy resolved: {cause_of_death} — {reasoning_summary}"`. Unresolved: `"autopsy unresolved: {cause_of_death}"`. |
+| `codeautopsy.decision.id` | string | Only present when resolved. |
+| `codeautopsy.decision.summary` | string | Only present when resolved — the AI's own reasoning. |
+| `codeautopsy.risk_flags` | string | Only present when resolved. |
+| `code.filepath` / `code.lineno` / `deployment.commit.sha` | — | Same crash coordinate as the span. |
+| `codeautopsy.resolved` | bool | Always present, regardless of outcome. |
+
+---
+
+## MCP tool spans (`codeautopsy/mcp/core.py`)
+
+Every call into `autopsy`/`prognose`/`leaderboard` — whether from an MCP client (Cursor, Claude
+Desktop) or called directly — is its own span (`codeautopsy.mcp.autopsy`, `.prognose`,
+`.leaderboard`). A real exception flips the span `ERROR` and records it; a legitimate negative
+result (e.g. `autopsy` finding no matching decision) is recorded as an attribute only — it is not
+misreported as an error.
+
+| Span | Attribute | Meaning |
+|---|---|---|
+| `codeautopsy.mcp.autopsy` | `codeautopsy.mcp.resolved` | Whether a decision was found — present even when `false`. |
+| `codeautopsy.mcp.prognose` | `codeautopsy.mcp.verdict` | `clear` / `flagged` / `priced`. |
+| `codeautopsy.mcp.leaderboard` | `codeautopsy.mcp.total_decisions`, `codeautopsy.mcp.total_incidents` | Aggregate counts at call time. |
 
 ---
 
