@@ -7,7 +7,7 @@
 # separate site-packages copy, which is what lets REPO_ROOT-relative git-blame resolution
 # (sample_app/main.py) work identically to a non-containerized checkout.
 
-FROM python:3.11.10-slim-bookworm@sha256:840e180ebcc6e5c8efab209c43f5e40fd2af98cb49db5c7103c90539c56bb30e
+FROM python:3.14.6-slim-bookworm@sha256:86f975aca15cf04a40b399eebede9aea7c82eae084d1f1a0a6ef6bcaae871a30
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
