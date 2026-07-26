@@ -25,6 +25,12 @@ def _record(**over: object) -> ProvenanceRecord:
         reasoning_summary="cast the discount code straight to int",
         risk_flags=["unvalidated-input"],
         decision_id="dec_abc",
+        # created_at is part of the hashed content (integrity._HASHED_FIELDS) and defaults to
+        # "now" on every construction — pin it so two _record() calls in the same test are
+        # actually identical, not just close in time. (This is what CI's faster/finer-grained
+        # clock caught and a coarser local clock didn't: two back-to-back "now" calls landing
+        # in the same tick isn't something to rely on.)
+        created_at="2026-01-01T00:00:00+00:00",
     )
     base.update(over)
     return ProvenanceRecord(**base)
