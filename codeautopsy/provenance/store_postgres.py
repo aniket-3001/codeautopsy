@@ -12,11 +12,18 @@ from typing import Any
 import psycopg
 
 from codeautopsy.autoheal.models import HealRun
+from codeautopsy.provenance.integrity import (
+    GENESIS_HASH,
+    ChainRow,
+    ChainVerification,
+    compute_hash,
+    verify_chain,
+)
 from codeautopsy.provenance.models import IncidentRecord, LessonRecord, ProvenanceRecord
 
 _COLUMNS = (
     "org_id, commit_sha, file_path, line_start, line_end, decision_span_id, decision_trace_id, "
-    "session_id, reasoning_summary, risk_flags, model, tool, decision_id, created_at"
+    "session_id, reasoning_summary, risk_flags, risk_source, model, tool, decision_id, created_at"
 )
 
 _INCIDENT_COLUMNS = (
@@ -36,10 +43,14 @@ CREATE TABLE IF NOT EXISTS provenance (
     session_id        TEXT NOT NULL,
     reasoning_summary TEXT NOT NULL DEFAULT '',
     risk_flags        TEXT NOT NULL DEFAULT '[]',
+    risk_source       TEXT NOT NULL DEFAULT 'heuristic',
     model             TEXT NOT NULL DEFAULT '',
     tool              TEXT NOT NULL DEFAULT 'claude-code',
     decision_id       TEXT NOT NULL DEFAULT '',
-    created_at        TEXT NOT NULL
+    created_at        TEXT NOT NULL,
+    record_hash       TEXT NOT NULL DEFAULT '',
+    prev_hash         TEXT NOT NULL DEFAULT '',
+    chain_seq         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_file ON provenance(file_path);
 
@@ -107,6 +118,26 @@ class PostgresProvenanceStore:
                 "ALTER TABLE provenance ADD COLUMN IF NOT EXISTS "
                 "org_id TEXT NOT NULL DEFAULT 'demo-public'"
             )
+            # Migration for provenance tables that predate the tamper-evidence hash chain.
+            # Pre-existing rows keep chain_seq = 0 (excluded from the chain, not backfilled —
+            # there is no previous hash to anchor them to).
+            conn.execute(
+                "ALTER TABLE provenance ADD COLUMN IF NOT EXISTS "
+                "record_hash TEXT NOT NULL DEFAULT ''"
+            )
+            conn.execute(
+                "ALTER TABLE provenance ADD COLUMN IF NOT EXISTS "
+                "prev_hash TEXT NOT NULL DEFAULT ''"
+            )
+            conn.execute(
+                "ALTER TABLE provenance ADD COLUMN IF NOT EXISTS "
+                "chain_seq INTEGER NOT NULL DEFAULT 0"
+            )
+            # Migration for provenance tables that predate mandatory risk-source labeling.
+            conn.execute(
+                "ALTER TABLE provenance ADD COLUMN IF NOT EXISTS "
+                "risk_source TEXT NOT NULL DEFAULT 'heuristic'"
+            )
             conn.execute("DROP INDEX IF EXISTS idx_blame")
             conn.execute(
                 "CREATE INDEX idx_blame "
@@ -120,12 +151,28 @@ class PostgresProvenanceStore:
                 "TEXT NOT NULL DEFAULT ''"
             )
 
+    def _chain_tip(self, conn: psycopg.Connection[Any], org_id: str) -> tuple[str, int]:
+        """The `(record_hash, chain_seq)` of this org's most recently written record, or the
+        genesis pair if the org has no chained records yet."""
+        row = conn.execute(
+            "SELECT record_hash, chain_seq FROM provenance WHERE org_id = %s "
+            "ORDER BY chain_seq DESC LIMIT 1",
+            (org_id,),
+        ).fetchone()
+        if row is None or not row[0]:
+            return GENESIS_HASH, 0
+        return str(row[0]), int(row[1])
+
     def add(self, record: ProvenanceRecord) -> None:
         with psycopg.connect(self.dsn) as conn:
+            prev_hash, prev_seq = self._chain_tip(conn, record.org_id)
+            record_hash = compute_hash(prev_hash, record)
             conn.execute(
                 f"""
-                INSERT INTO provenance ({_COLUMNS})
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO provenance (
+                    {_COLUMNS}, record_hash, prev_hash, chain_seq
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     record.org_id,
@@ -138,10 +185,14 @@ class PostgresProvenanceStore:
                     record.session_id,
                     record.reasoning_summary,
                     json.dumps(record.risk_flags),
+                    record.risk_source,
                     record.model,
                     record.tool,
                     record.decision_id,
                     record.created_at,
+                    record_hash,
+                    prev_hash,
+                    prev_seq + 1,
                 ),
             )
 
@@ -154,7 +205,38 @@ class PostgresProvenanceStore:
     def _row_to_record(row: tuple[Any, ...], columns: list[str]) -> ProvenanceRecord:
         data = dict(zip(columns, row, strict=True))
         data["risk_flags"] = json.loads(data.get("risk_flags") or "[]")
+        # Hash-chain bookkeeping columns aren't part of the record's own content.
+        data.pop("record_hash", None)
+        data.pop("prev_hash", None)
+        data.pop("chain_seq", None)
         return ProvenanceRecord(**data)
+
+    def chain_rows(self, org_id: str = "demo-public") -> list[ChainRow]:
+        """(record, prev_hash, record_hash, chain_seq) for this org's chained records, in
+        chain order. Rows with chain_seq == 0 predate the hash chain and are excluded."""
+        with psycopg.connect(self.dsn) as conn:
+            cur = conn.execute(
+                f"SELECT {_COLUMNS}, record_hash, prev_hash, chain_seq FROM provenance "
+                "WHERE org_id = %s AND chain_seq > 0 ORDER BY chain_seq",
+                (org_id,),
+            )
+            assert cur.description is not None
+            columns = [d.name for d in cur.description]
+            rows = cur.fetchall()
+        result: list[ChainRow] = []
+        for row in rows:
+            data = dict(zip(columns, row, strict=True))
+            prev_hash = str(data.pop("prev_hash", "") or "")
+            record_hash = str(data.pop("record_hash", "") or "")
+            chain_seq = int(data.pop("chain_seq", 0) or 0)
+            data["risk_flags"] = json.loads(data.get("risk_flags") or "[]")
+            result.append((ProvenanceRecord(**data), prev_hash, record_hash, chain_seq))
+        return result
+
+    def verify_integrity(self, org_id: str = "demo-public") -> ChainVerification:
+        """Recompute this org's hash chain and compare it against what's stored — a mismatch
+        means a provenance row was altered after it was written."""
+        return verify_chain(self.chain_rows(org_id), org_id=org_id)
 
     def find_by_line(
         self, commit_sha: str, file_path: str, line: int, org_id: str = "demo-public"

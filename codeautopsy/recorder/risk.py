@@ -8,7 +8,22 @@ from __future__ import annotations
 
 import json
 import re
+from enum import StrEnum
 from pathlib import Path
+
+
+class RiskSource(StrEnum):
+    """Where a decision's risk flags came from — a closed enum so a future signal (e.g. an
+    LLM asked to judge a diff's riskiness) can never get silently conflated with today's
+    deterministic pattern matches on a dashboard or in the leaderboard's crash-rate pricing.
+    Mirrors `ProvenanceRecord.risk_source` (`provenance/models.py`); kept in sync by hand since
+    that field is a plain `Literal`, not this enum, to avoid `provenance` depending on
+    `recorder` for a two-value type.
+    """
+
+    HEURISTIC = "heuristic"
+    AI_JUDGE = "ai_judge"
+
 
 RISK_PATTERNS: dict[str, re.Pattern[str]] = {
     "assumed_valid_input": re.compile(

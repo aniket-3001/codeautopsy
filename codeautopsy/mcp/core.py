@@ -193,3 +193,34 @@ def leaderboard(
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             raise
+
+
+def verify_provenance(
+    *,
+    org_id: str = "demo-public",
+    store: ProvenanceStoreProtocol | None = None,
+    settings: Settings | None = None,
+    tracer_provider: TracerProvider | None = None,
+) -> dict[str, Any]:
+    """Cryptographically verify the provenance chain hasn't been tampered with since ingestion.
+
+    Recomputes a sha256 hash chain over this org's decision records — each record's hash
+    commits to its own content plus the previous record's hash — and compares it against what's
+    stored. A mismatch means a row was altered after being written. This is a stronger
+    guarantee than round-tripping through git commit trailers alone: trailers protect the git
+    side of provenance, not the database rows the indexer and confidence scorer actually query.
+    """
+    tracer = trace.get_tracer(_tracer_name, tracer_provider=tracer_provider)
+    with tracer.start_as_current_span("codeautopsy.mcp.verify_provenance") as span:
+        span.set_attribute("codeautopsy.mcp.org_id", org_id)
+        try:
+            settings = settings or get_settings()
+            store = store or make_store(settings)
+            result = store.verify_integrity(org_id)
+            span.set_attribute("codeautopsy.mcp.chain_valid", result.valid)
+            span.set_attribute("codeautopsy.mcp.chain_length", result.length)
+            return result.model_dump()
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            raise

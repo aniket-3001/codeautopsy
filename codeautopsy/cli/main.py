@@ -361,6 +361,11 @@ def record(
     risk_flag: list[str] = typer.Option(
         None, "--risk-flag", help="A risk flag for the decision (repeatable)."
     ),
+    risk_source: str = typer.Option(
+        "heuristic", "--risk-source",
+        help="Where the risk flags came from: 'heuristic' (pattern match) or 'ai_judge' "
+        "(a model judged it). Mandatory so the two can never silently blend on a dashboard.",
+    ),
     tool: str = typer.Option("manual", "--tool", help="Which agent/tool made the decision."),
     model: str = typer.Option("", "--model", help="Model that authored it, if any."),
     api_key: str = typer.Option(
@@ -377,6 +382,10 @@ def record(
     The Claude Code hook records automatically; this is the agent-agnostic path so any tool,
     script, or human can log the reasoning behind a line range and have crashes trace back to it.
     """
+    if risk_source not in ("heuristic", "ai_judge"):
+        raise typer.BadParameter(
+            "must be 'heuristic' or 'ai_judge'", param_hint="--risk-source"
+        )
     line_start, line_end = _parse_lines(lines)
     # Content-anchored id: survives reformatting/rebase where line numbers drift.
     decision_id = "dec_" + hashlib.sha1(
@@ -392,6 +401,7 @@ def record(
         session_id=f"sess_{secrets.token_hex(4)}",
         reasoning_summary=reasoning,
         risk_flags=list(risk_flag or []),
+        risk_source=risk_source,  # type: ignore[arg-type]  # validated above
         model=model,
         tool=tool,
         decision_id=decision_id,

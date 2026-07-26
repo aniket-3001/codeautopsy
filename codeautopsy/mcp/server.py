@@ -1,7 +1,7 @@
 """stdio MCP server exposing CodeAutopsy's tools. Entry point: `codeautopsy-mcp`.
 
 Wire it into an MCP client (Cursor, Claude Desktop, …) as a server whose command is
-`codeautopsy-mcp`. The agent then gets four CodeAutopsy tools on its menu — see `core.py`
+`codeautopsy-mcp`. The agent then gets five CodeAutopsy tools on its menu — see `core.py`
 for the logic each one runs.
 
 Install with the extra so the `mcp` package is present:  `pip install -e ".[mcp]"`.
@@ -68,6 +68,17 @@ def build_server() -> Any:
         """
         return core.leaderboard()
 
+    @server.tool()
+    def verify_provenance(org_id: str = "demo-public") -> dict[str, Any]:
+        """Cryptographically verify the provenance chain hasn't been tampered with.
+
+        Recomputes a sha256 hash chain over every recorded decision — each record's hash
+        commits to its own content plus the previous record's hash — and compares it against
+        what's stored. `valid: true` means nothing in the chain was altered since ingestion;
+        `valid: false` names the first record (`broken_at`) where recomputation diverged.
+        """
+        return core.verify_provenance(org_id=org_id)
+
     return server
 
 
@@ -75,11 +86,11 @@ def run() -> None:  # pragma: no cover
     """Run the server over stdio (the transport MCP clients launch).
 
     Bootstraps a real TracerProvider here — not at module import time, so importing this
-    module for `build_server()` alone (as `test_server_registers_four_tools` does) stays
+    module for `build_server()` alone (as `test_server_registers_five_tools` does) stays
     free of OTel side effects, matching the "importing this module stays cheap" contract
-    documented above. Every call an MCP client makes into
-    `autopsy`/`prognose`/`postmortem`/`leaderboard` (`codeautopsy/mcp/core.py`) is now itself a
-    span in the same SigNoz pipeline the rest of CodeAutopsy exports to.
+    documented above. Every call an MCP client makes into `autopsy`/`prognose`/`postmortem`/
+    `leaderboard`/`verify_provenance` (`codeautopsy/mcp/core.py`) is now itself a span in the
+    same SigNoz pipeline the rest of CodeAutopsy exports to.
 
     Not unit-tested: this blocks on the real stdio transport, which only makes sense under
     an actual MCP client. `build_server()`'s tool wiring is covered directly (see test_mcp.py).

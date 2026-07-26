@@ -14,6 +14,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from codeautopsy.autoheal.models import HealRun
+from codeautopsy.provenance.integrity import (
+    GENESIS_HASH,
+    ChainRow,
+    ChainVerification,
+    compute_hash,
+    verify_chain,
+)
 from codeautopsy.provenance.models import IncidentRecord, LessonRecord, ProvenanceRecord
 
 if TYPE_CHECKING:
@@ -39,6 +46,8 @@ class ProvenanceStoreProtocol(Protocol):
     def record_lesson(self, lesson: LessonRecord) -> None: ...
     def find_lesson(self, org_id: str, fingerprint: str) -> LessonRecord | None: ...
     def list_lessons(self, org_id: str = "demo-public") -> list[LessonRecord]: ...
+    def chain_rows(self, org_id: str = "demo-public") -> list[ChainRow]: ...
+    def verify_integrity(self, org_id: str = "demo-public") -> ChainVerification: ...
 
 
 _SCHEMA = """
@@ -53,10 +62,14 @@ CREATE TABLE IF NOT EXISTS provenance (
     session_id        TEXT NOT NULL,
     reasoning_summary TEXT NOT NULL DEFAULT '',
     risk_flags        TEXT NOT NULL DEFAULT '[]',
+    risk_source       TEXT NOT NULL DEFAULT 'heuristic',
     model             TEXT NOT NULL DEFAULT '',
     tool              TEXT NOT NULL DEFAULT 'claude-code',
     decision_id       TEXT NOT NULL DEFAULT '',
-    created_at        TEXT NOT NULL
+    created_at        TEXT NOT NULL,
+    record_hash       TEXT NOT NULL DEFAULT '',
+    prev_hash         TEXT NOT NULL DEFAULT '',
+    chain_seq         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_file ON provenance(file_path);
 
@@ -150,17 +163,45 @@ class ProvenanceStore:
                     conn.execute(f"ALTER TABLE incidents ADD COLUMN {col} TEXT")
                 except sqlite3.OperationalError:
                     pass
+            # Migration for provenance tables that predate the tamper-evidence hash chain.
+            # Pre-existing rows keep chain_seq = 0 (excluded from the chain, not backfilled —
+            # there is no previous hash to anchor them to).
+            for ddl in (
+                "record_hash TEXT NOT NULL DEFAULT ''",
+                "prev_hash TEXT NOT NULL DEFAULT ''",
+                "chain_seq INTEGER NOT NULL DEFAULT 0",
+                "risk_source TEXT NOT NULL DEFAULT 'heuristic'",
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE provenance ADD COLUMN {ddl}")
+                except sqlite3.OperationalError:
+                    pass
 
     # --- writes -------------------------------------------------------------------
+    def _chain_tip(self, conn: sqlite3.Connection, org_id: str) -> tuple[str, int]:
+        """The `(record_hash, chain_seq)` of this org's most recently written record, or the
+        genesis pair if the org has no chained records yet."""
+        row = conn.execute(
+            "SELECT record_hash, chain_seq FROM provenance WHERE org_id = ? "
+            "ORDER BY chain_seq DESC LIMIT 1",
+            (org_id,),
+        ).fetchone()
+        if row is None or not row["record_hash"]:
+            return GENESIS_HASH, 0
+        return str(row["record_hash"]), int(row["chain_seq"])
+
     def add(self, record: ProvenanceRecord) -> None:
         with self._conn() as conn:
+            prev_hash, prev_seq = self._chain_tip(conn, record.org_id)
+            record_hash = compute_hash(prev_hash, record)
             conn.execute(
                 """
                 INSERT INTO provenance (
                     org_id, commit_sha, file_path, line_start, line_end,
                     decision_span_id, decision_trace_id, session_id,
-                    reasoning_summary, risk_flags, model, tool, decision_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reasoning_summary, risk_flags, risk_source, model, tool, decision_id,
+                    created_at, record_hash, prev_hash, chain_seq
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.org_id,
@@ -173,10 +214,14 @@ class ProvenanceStore:
                     record.session_id,
                     record.reasoning_summary,
                     json.dumps(record.risk_flags),
+                    record.risk_source,
                     record.model,
                     record.tool,
                     record.decision_id,
                     record.created_at,
+                    record_hash,
+                    prev_hash,
+                    prev_seq + 1,
                 ),
             )
 
@@ -190,6 +235,10 @@ class ProvenanceStore:
     def _row_to_record(row: sqlite3.Row) -> ProvenanceRecord:
         data = dict(row)
         data["risk_flags"] = json.loads(data.get("risk_flags") or "[]")
+        # Hash-chain bookkeeping columns aren't part of the record's own content.
+        data.pop("record_hash", None)
+        data.pop("prev_hash", None)
+        data.pop("chain_seq", None)
         return ProvenanceRecord(**data)
 
     def find_by_line(
@@ -239,6 +288,30 @@ class ProvenanceStore:
                     (decision_id, org_id),
                 )
             return cur.rowcount
+
+    # --- tamper-evidence ------------------------------------------------------------
+    def chain_rows(self, org_id: str = "demo-public") -> list[ChainRow]:
+        """(record, prev_hash, record_hash, chain_seq) for this org's chained records, in
+        chain order. Rows with chain_seq == 0 predate the hash chain and are excluded."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM provenance WHERE org_id = ? AND chain_seq > 0 ORDER BY chain_seq",
+                (org_id,),
+            ).fetchall()
+        return [
+            (
+                self._row_to_record(r),
+                str(r["prev_hash"] or ""),
+                str(r["record_hash"] or ""),
+                int(r["chain_seq"]),
+            )
+            for r in rows
+        ]
+
+    def verify_integrity(self, org_id: str = "demo-public") -> ChainVerification:
+        """Recompute this org's hash chain and compare it against what's stored — a mismatch
+        means a provenance row was altered after it was written."""
+        return verify_chain(self.chain_rows(org_id), org_id=org_id)
 
     # --- incidents ------------------------------------------------------------------
     def add_incident(self, incident: IncidentRecord) -> None:

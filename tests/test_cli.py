@@ -503,6 +503,68 @@ def test_record_local(monkeypatch, tmp_path):
     assert "(local" in result.stdout
 
 
+def test_record_local_defaults_risk_source_to_heuristic(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+    from codeautopsy.provenance.store import ProvenanceStore
+
+    db = tmp_path / "p.db"
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(db))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "record",
+            "--commit", "abc123def456",
+            "--file", "app/checkout.py",
+            "--lines", "40-46",
+        ],
+    )
+    assert result.exit_code == 0
+    rec = ProvenanceStore(db).all()[0]
+    assert rec.risk_source == "heuristic"
+
+
+def test_record_local_accepts_ai_judge_risk_source(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+    from codeautopsy.provenance.store import ProvenanceStore
+
+    db = tmp_path / "p.db"
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(db))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "record",
+            "--commit", "abc123def456",
+            "--file", "app/checkout.py",
+            "--lines", "40-46",
+            "--risk-source", "ai_judge",
+        ],
+    )
+    assert result.exit_code == 0
+    rec = ProvenanceStore(db).all()[0]
+    assert rec.risk_source == "ai_judge"
+
+
+def test_record_rejects_invalid_risk_source(monkeypatch, tmp_path):
+    from codeautopsy.config import Settings
+
+    settings = Settings(CODEAUTOPSY_PROVENANCE_DB=str(tmp_path / "p.db"))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "record",
+            "--commit", "abc123def456",
+            "--file", "app/checkout.py",
+            "--lines", "40-46",
+            "--risk-source", "vibes",
+        ],
+    )
+    # typer.BadParameter maps to Click's usage-error exit code.
+    assert result.exit_code == 2
+
+
 def test_record_hosted(monkeypatch):
     monkeypatch.setattr(
         cli_main.httpx, "post", lambda *a, **kw: _FakeResponse({"records": 5})

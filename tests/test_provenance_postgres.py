@@ -87,3 +87,30 @@ def test_add_many_and_all(store):
     all_records = store.all()
     assert len(all_records) == 2
     assert {r.decision_id for r in all_records} == {"dec_7f3a", "d2"}
+
+
+def test_add_chains_records_and_verify_integrity(store):
+    store.add(_record("abc123", 40, 45, decision_id="d1"))
+    store.add(_record("abc123", 50, 55, decision_id="d2"))
+    rows = store.chain_rows()
+    assert [r[0].decision_id for r in rows] == ["d1", "d2"]
+    assert [r[3] for r in rows] == [1, 2]
+    assert rows[1][1] == rows[0][2]  # d2's prev_hash == d1's record_hash
+
+    result = store.verify_integrity()
+    assert result.valid is True
+    assert result.length == 2
+
+
+def test_verify_integrity_detects_a_row_edited_outside_the_store_api(store):
+    import psycopg
+
+    store.add(_record("abc123", 40, 45, decision_id="d1"))
+    with psycopg.connect(store.dsn) as conn:
+        conn.execute(
+            "UPDATE provenance SET reasoning_summary = %s WHERE decision_id = %s",
+            ("this reasoning was never actually written", "d1"),
+        )
+    result = store.verify_integrity()
+    assert result.valid is False
+    assert result.broken_at == "d1"

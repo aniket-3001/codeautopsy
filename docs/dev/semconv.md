@@ -41,6 +41,7 @@ Recorded when an AI coding agent writes code, one span per edit.
 | `code.lines.start` | int | First line of the edited range. |
 | `code.lines.end` | int | Last line of the edited range. |
 | `codeautopsy.risk_flags` | string | Comma-joined risk flags raised at write time (e.g. `unvalidated-input`). |
+| `codeautopsy.risk_source` | string | Mandatory, closed to `heuristic` / `ai_judge` — which mechanism produced `risk_flags`. Always `heuristic` today (`recorder/risk.py` is pattern matching, no LLM judgment call); kept explicit so a future AI-judged signal can never silently blend with a deterministic one on a dashboard or in the leaderboard's crash-rate pricing. |
 
 ---
 
@@ -95,17 +96,19 @@ open a trace to see.
 
 ## MCP tool spans (`codeautopsy/mcp/core.py`)
 
-Every call into `autopsy`/`prognose`/`leaderboard` — whether from an MCP client (Cursor, Claude
-Desktop) or called directly — is its own span (`codeautopsy.mcp.autopsy`, `.prognose`,
-`.leaderboard`). A real exception flips the span `ERROR` and records it; a legitimate negative
-result (e.g. `autopsy` finding no matching decision) is recorded as an attribute only — it is not
-misreported as an error.
+Every call into `autopsy`/`prognose`/`postmortem`/`leaderboard`/`verify_provenance` — whether
+from an MCP client (Cursor, Claude Desktop) or called directly — is its own span
+(`codeautopsy.mcp.autopsy`, `.prognose`, `.postmortem`, `.leaderboard`, `.verify_provenance`). A
+real exception flips the span `ERROR` and records it; a legitimate negative result (e.g.
+`autopsy` finding no matching decision, or `verify_provenance` finding a broken chain) is
+recorded as an attribute only — it is not misreported as an error.
 
 | Span | Attribute | Meaning |
 |---|---|---|
 | `codeautopsy.mcp.autopsy` | `codeautopsy.mcp.resolved` | Whether a decision was found — present even when `false`. |
 | `codeautopsy.mcp.prognose` | `codeautopsy.mcp.verdict` | `clear` / `flagged` / `priced`. |
 | `codeautopsy.mcp.leaderboard` | `codeautopsy.mcp.total_decisions`, `codeautopsy.mcp.total_incidents` | Aggregate counts at call time. |
+| `codeautopsy.mcp.verify_provenance` | `codeautopsy.mcp.chain_valid`, `codeautopsy.mcp.chain_length` | Recomputes the org's tamper-evidence hash chain (`provenance/integrity.py`) and compares it to what's stored; `chain_valid: false` means a record was altered after it was written. |
 
 ---
 

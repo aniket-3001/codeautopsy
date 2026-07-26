@@ -23,7 +23,11 @@ from opentelemetry.sdk.trace import TracerProvider
 
 from codeautopsy.otel import build_tracer_provider, force_utf8_stdout
 from codeautopsy.recorder.pending import append_pending
-from codeautopsy.recorder.risk import detect_risk_flags, extract_last_assistant_reasoning
+from codeautopsy.recorder.risk import (
+    RiskSource,
+    detect_risk_flags,
+    extract_last_assistant_reasoning,
+)
 
 TRACKED_TOOLS = {"Edit", "Write"}
 
@@ -105,6 +109,9 @@ def record_post_tool_use(
 
     reasoning = extract_last_assistant_reasoning(transcript_path) if transcript_path else ""
     risk_flags = detect_risk_flags(reasoning, code_sample)
+    # `detect_risk_flags` is regex/pattern matching, never an LLM judgment call — see
+    # `RiskSource`'s docstring for why this is stamped explicitly rather than left implicit.
+    risk_source = RiskSource.HEURISTIC.value
     rel_path = _relative_path(file_path, repo_root)
     decision_id = _decision_id(rel_path, line_start)
 
@@ -119,6 +126,7 @@ def record_post_tool_use(
     span.set_attribute("agent.reasoning", reasoning or "(no reasoning captured)")
     span.set_attribute("agent.decision.id", decision_id)
     span.set_attribute("codeautopsy.risk_flags", ",".join(risk_flags))
+    span.set_attribute("codeautopsy.risk_source", risk_source)
     ctx = span.get_span_context()
     span.end()
     if tracer_provider is None:
@@ -134,6 +142,7 @@ def record_post_tool_use(
         "session_id": session_id,
         "reasoning_summary": reasoning,
         "risk_flags": risk_flags,
+        "risk_source": risk_source,
         "decision_id": decision_id,
         "tool": "claude-code",
     }

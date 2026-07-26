@@ -2,7 +2,7 @@
 
 These exercise the pure tool functions directly with an in-memory-ish SQLite store, so they
 need neither the `mcp` package's transport nor a network hop. A separate test confirms the
-FastMCP server wires the four tools up when the `mcp` package is present.
+FastMCP server wires the five tools up when the `mcp` package is present.
 """
 
 from __future__ import annotations
@@ -142,6 +142,36 @@ def test_leaderboard_ranks_tools(store: ProvenanceStore) -> None:
     assert out["total_incidents"] == 1
     assert out["scores"], "expected at least one ranked tool/model"
     assert out["scores"][0]["tool"] == "claude-code"
+
+
+def test_verify_provenance_valid_chain(store: ProvenanceStore) -> None:
+    store.add(_record(decision_id="d1"))
+    store.add(_record(decision_id="d2", line_start=50, line_end=55))
+    out = core.verify_provenance(store=store, settings=_settings())
+    assert out["valid"] is True
+    assert out["length"] == 2
+    assert out["broken_at"] is None
+
+
+def test_verify_provenance_empty_chain(store: ProvenanceStore) -> None:
+    out = core.verify_provenance(store=store, settings=_settings())
+    assert out["valid"] is True
+    assert out["length"] == 0
+
+
+def test_verify_provenance_detects_tampering(store: ProvenanceStore) -> None:
+    """A row edited directly in the database (bypassing `store.add()`) must be caught —
+    that's the whole point of the hash chain: it isn't the write path that's trusted, it's
+    the recomputation."""
+    store.add(_record(decision_id="d1"))
+    with store._conn() as conn:  # noqa: SLF001 — reaching past the API is the point of this test
+        conn.execute(
+            "UPDATE provenance SET reasoning_summary = ? WHERE decision_id = ?",
+            ("this was never actually said", "d1"),
+        )
+    out = core.verify_provenance(store=store, settings=_settings())
+    assert out["valid"] is False
+    assert out["broken_at"] == "d1"
 
 
 def test_postmortem_renders_full_case_file_with_lesson(
@@ -356,6 +386,33 @@ def test_leaderboard_span_records_totals(store: ProvenanceStore) -> None:
     assert span.attributes["codeautopsy.mcp.total_incidents"] == 1
 
 
+def test_verify_provenance_span_records_chain_result(store: ProvenanceStore) -> None:
+    store.add(_record(decision_id="d1"))
+    provider, exporter = _memory_provider()
+    core.verify_provenance(store=store, settings=_settings(), tracer_provider=provider)
+    span = exporter.get_finished_spans()[0]
+    assert span.name == "codeautopsy.mcp.verify_provenance"
+    assert span.attributes["codeautopsy.mcp.chain_valid"] is True
+    assert span.attributes["codeautopsy.mcp.chain_length"] == 1
+
+
+def test_verify_provenance_span_records_exception_and_reraises(
+    store: ProvenanceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(self: ProvenanceStore, org_id: str = "demo-public") -> None:
+        raise RuntimeError("verify blew up")
+
+    monkeypatch.setattr(ProvenanceStore, "verify_integrity", _raise)
+    provider, exporter = _memory_provider()
+
+    with pytest.raises(RuntimeError, match="verify blew up"):
+        core.verify_provenance(store=store, settings=_settings(), tracer_provider=provider)
+
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code == StatusCode.ERROR
+    assert span.events[0].name == "exception"
+
+
 def test_postmortem_span_records_success(
     store: ProvenanceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -408,13 +465,13 @@ def test_postmortem_span_records_exception_and_reraises(
 
 
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")
-def test_server_registers_four_tools() -> None:
+def test_server_registers_five_tools() -> None:
     from codeautopsy.mcp.server import build_server
 
     server = build_server()
     # FastMCP exposes registered tools asynchronously; the manager holds them synchronously.
     names = set(server._tool_manager._tools.keys())  # noqa: SLF001
-    assert {"autopsy", "prognose", "postmortem", "leaderboard"} <= names
+    assert {"autopsy", "prognose", "postmortem", "leaderboard", "verify_provenance"} <= names
 
 
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")
@@ -445,6 +502,10 @@ def test_server_tool_wrappers_call_through_to_core(
 
     leaderboard_out = tools["leaderboard"].fn()
     assert leaderboard_out["total_decisions"] == 1
+
+    verify_out = tools["verify_provenance"].fn()
+    assert verify_out["valid"] is True
+    assert verify_out["length"] == 1
 
 
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp package not installed")

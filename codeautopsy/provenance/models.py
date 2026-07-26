@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -33,6 +33,13 @@ class ProvenanceRecord(BaseModel):
     session_id: str
     reasoning_summary: str = ""
     risk_flags: list[str] = Field(default_factory=list)
+    # Mandatory, closed to two values: which mechanism produced `risk_flags` above. Today
+    # every detector is "heuristic" (regex/pattern matching, see `recorder/risk.py`), but
+    # keeping this explicit — rather than assuming — means a future LLM-judged risk signal
+    # can never silently blend with a deterministic one on a dashboard or in the leaderboard's
+    # crash-rate pricing. Kept as a plain `Literal` (not an import of `recorder.risk.RiskSource`)
+    # so `provenance` doesn't depend on `recorder` for a two-value type.
+    risk_source: Literal["heuristic", "ai_judge"] = "heuristic"
     model: str = ""
     tool: str = "claude-code"
     # A content-anchored id so a decision survives reformatting/rebase (line numbers drift).

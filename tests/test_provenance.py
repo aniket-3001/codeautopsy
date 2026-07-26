@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 import codeautopsy.provenance.indexer as indexer_module
 from codeautopsy.provenance.indexer import (
     blame_introducing_commit,
@@ -190,3 +192,94 @@ def test_record_contains_line():
     assert rec.contains_line(45) is True
     assert rec.contains_line(39) is False
     assert rec.contains_line(46) is False
+
+
+def test_record_risk_source_defaults_to_heuristic():
+    assert _record("abc123", 40, 45).risk_source == "heuristic"
+
+
+def test_record_risk_source_accepts_ai_judge():
+    assert _record("abc123", 40, 45, risk_source="ai_judge").risk_source == "ai_judge"
+
+
+def test_record_risk_source_rejects_unknown_values():
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        _record("abc123", 40, 45, risk_source="vibes")
+
+
+# --- tamper-evidence: the hash chain -----------------------------------------------------
+
+
+def test_add_chains_records_by_org(tmp_path: Path):
+    store = ProvenanceStore(tmp_path / "p.db")
+    store.add(_record("abc123", 40, 45, decision_id="d1"))
+    store.add(_record("abc123", 50, 55, decision_id="d2"))
+    rows = store.chain_rows()
+    assert [r[0].decision_id for r in rows] == ["d1", "d2"]
+    assert [r[3] for r in rows] == [1, 2]  # chain_seq
+    # d2's prev_hash must equal d1's record_hash — the actual link.
+    assert rows[1][1] == rows[0][2]
+
+
+def test_chain_rows_scoped_per_org(tmp_path: Path):
+    """Two orgs writing concurrently must not cross-link — each tenant gets its own chain."""
+    store = ProvenanceStore(tmp_path / "p.db")
+    store.add(_record("abc123", 40, 45, decision_id="d1", org_id="org-a"))
+    store.add(_record("abc123", 50, 55, decision_id="d2", org_id="org-b"))
+    store.add(_record("abc123", 60, 65, decision_id="d3", org_id="org-a"))
+    a_rows = store.chain_rows("org-a")
+    b_rows = store.chain_rows("org-b")
+    assert [r[0].decision_id for r in a_rows] == ["d1", "d3"]
+    assert [r[0].decision_id for r in b_rows] == ["d2"]
+    assert [r[3] for r in a_rows] == [1, 2]
+    assert [r[3] for r in b_rows] == [1]
+
+
+def test_verify_integrity_valid_on_untouched_store(tmp_path: Path):
+    store = ProvenanceStore(tmp_path / "p.db")
+    store.add(_record("abc123", 40, 45, decision_id="d1"))
+    store.add(_record("abc123", 50, 55, decision_id="d2"))
+    result = store.verify_integrity()
+    assert result.valid is True
+    assert result.length == 2
+
+
+def test_verify_integrity_detects_a_row_edited_outside_the_store_api(tmp_path: Path):
+    store = ProvenanceStore(tmp_path / "p.db")
+    store.add(_record("abc123", 40, 45, decision_id="d1"))
+    with store._conn() as conn:  # noqa: SLF001 — deliberately bypassing add() to simulate tampering
+        conn.execute(
+            "UPDATE provenance SET reasoning_summary = ? WHERE decision_id = ?",
+            ("this reasoning was never actually written", "d1"),
+        )
+    result = store.verify_integrity()
+    assert result.valid is False
+    assert result.broken_at == "d1"
+
+
+def test_verify_integrity_empty_store_is_valid(tmp_path: Path):
+    store = ProvenanceStore(tmp_path / "p.db")
+    result = store.verify_integrity()
+    assert result.valid is True
+    assert result.length == 0
+
+
+def test_pre_chain_legacy_rows_are_excluded_not_backfilled(tmp_path: Path):
+    """A row inserted before this feature existed (chain_seq defaults to 0) must not be
+    silently folded into the chain — there's no real previous hash to anchor it to."""
+    store = ProvenanceStore(tmp_path / "p.db")
+    with store._conn() as conn:  # noqa: SLF001
+        conn.execute(
+            "INSERT INTO provenance (org_id, commit_sha, file_path, line_start, line_end, "
+            "decision_span_id, decision_trace_id, session_id, reasoning_summary, risk_flags, "
+            "model, tool, decision_id, created_at) VALUES "
+            "('demo-public', 'abc123', 'app/payment.py', 1, 1, 'span', 'trace', 'sess', "
+            "'legacy row', '[]', '', 'claude-code', 'dec_legacy', '2026-01-01T00:00:00+00:00')"
+        )
+    assert store.count() == 1
+    assert store.chain_rows() == []
+    result = store.verify_integrity()
+    assert result.valid is True
+    assert result.length == 0

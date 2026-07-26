@@ -48,6 +48,7 @@ def index_pending_at_head(repo_root: Path, store: ProvenanceStore) -> int:
             session_id=item["session_id"],
             reasoning_summary=item.get("reasoning_summary", ""),
             risk_flags=item.get("risk_flags", []),
+            risk_source=item.get("risk_source", "heuristic"),
             decision_id=item.get("decision_id", ""),
             tool=item.get("tool", "claude-code"),
         )

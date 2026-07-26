@@ -27,7 +27,11 @@ from codeautopsy.recorder.hooks import (
     record_post_tool_use,
 )
 from codeautopsy.recorder.pending import append_pending, clear_pending, read_pending
-from codeautopsy.recorder.risk import detect_risk_flags, extract_last_assistant_reasoning
+from codeautopsy.recorder.risk import (
+    RiskSource,
+    detect_risk_flags,
+    extract_last_assistant_reasoning,
+)
 
 
 def _memory_provider() -> tuple[TracerProvider, InMemorySpanExporter]:
@@ -64,6 +68,12 @@ def test_detect_risk_flags_empty():
 
 def test_detect_risk_flags_clean_code():
     assert detect_risk_flags("added input validation with a regex", "if not code.isdigit(): raise") == []
+
+
+def test_risk_source_is_a_closed_two_value_enum():
+    assert RiskSource.HEURISTIC.value == "heuristic"
+    assert RiskSource.AI_JUDGE.value == "ai_judge"
+    assert {m.value for m in RiskSource} == {"heuristic", "ai_judge"}
 
 
 def test_extract_reasoning_missing_transcript(tmp_path: Path):
@@ -215,10 +225,15 @@ def test_record_post_tool_use_captures_risk_flags(tmp_path: Path):
         "transcript_path": str(transcript),
         "tool_input": {"file_path": str(target), "old_string": "", "new_string": "x = int(code)"},
     }
-    provider, _ = _memory_provider()
+    provider, exporter = _memory_provider()
     record = record_post_tool_use(payload, tracer_provider=provider)
     assert "assumed_valid_input" in record["risk_flags"]
     assert record["reasoning_summary"] == "assuming the input is always valid here"
+    # detect_risk_flags is pattern matching, never an LLM judgment — must be stamped as such,
+    # explicitly, not left to whatever the model default happens to be.
+    assert record["risk_source"] == "heuristic"
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes["codeautopsy.risk_source"] == "heuristic"
 
 
 # --- commit indexer (real git repo, end-to-end) --------------------------------------------
@@ -246,6 +261,7 @@ def test_index_pending_at_head_binds_real_commit(tmp_path: Path):
             "session_id": "sess_1",
             "reasoning_summary": "assuming input is always valid",
             "risk_flags": ["assumed_valid_input"],
+            "risk_source": "ai_judge",
             "decision_id": "dec_1",
             "tool": "claude-code",
         },
@@ -264,6 +280,49 @@ def test_index_pending_at_head_binds_real_commit(tmp_path: Path):
     assert rec is not None
     assert rec.decision_id == "dec_1"
     assert rec.commit_sha == head
+    # A pending item's own risk_source must survive the commit-bind, not silently reset to
+    # the field's default — that would defeat the point of stamping it at capture time.
+    assert rec.risk_source == "ai_judge"
+
+
+def test_index_pending_at_head_defaults_risk_source_when_absent(tmp_path: Path):
+    """Pending items queued before this field existed have no "risk_source" key at all —
+    binding one must not crash, and should fall back to the honest default."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], capture_output=True, check=True)
+    _git(repo, "config", "user.email", "t@t.co")
+    _git(repo, "config", "user.name", "t")
+
+    target = repo / "app.py"
+    target.write_text("x = int(code)\n", encoding="utf-8")
+
+    append_pending(
+        repo,
+        {
+            "file_path": "app.py",
+            "line_start": 1,
+            "line_end": 1,
+            "decision_span_id": "e91ca75cd1ae81e4",
+            "decision_trace_id": "c51641b768a8a67ea979f9005ade2f55",
+            "session_id": "sess_1",
+            "reasoning_summary": "no risk_source key here (pre-migration pending item)",
+            "risk_flags": [],
+            "decision_id": "dec_legacy",
+            "tool": "claude-code",
+        },
+    )
+
+    _git(repo, "add", "app.py")
+    _git(repo, "commit", "-m", "add discount parse")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    store = ProvenanceStore(tmp_path / "p.db")
+    index_pending_at_head(repo, store)
+
+    rec = store.find_by_line(head, "app.py", 1)
+    assert rec is not None
+    assert rec.risk_source == "heuristic"
 
 
 def test_index_pending_noop_when_empty(tmp_path: Path):
