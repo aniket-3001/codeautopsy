@@ -292,7 +292,7 @@ see the Demo-first scope callout at the top.**
 ### ✅ M0 — Foundation (done)
 Single-tenant spine, persistent Postgres, live on Cloud Run, CI/CD, landing + scripted demo.
 
-### M1 — Accounts, tenancy & isolation *(the auth foundation)*
+### ✅ M1 — Accounts, tenancy & isolation *(the auth foundation)* (done)
 **Build:** users + orgs + memberships + API keys; argon2 password hashing; JWT sessions; `org_id`
 on provenance + new `incidents` table; `require_user` / `require_api_key` deps; the `/v1` auth +
 tenant-scoped ingestion/resolve endpoints; migration on startup; tests to 100% on new code; JWT
@@ -300,7 +300,7 @@ secret in Secret Manager; deploy.
 **Done when:** two different signed-up orgs can each push decisions via their own API key and
 **cannot see each other's data**, verified by an isolation test and live.
 
-### M2 — Real dashboard *(the website that replaces the demo)*
+### ✅ M2 — Real dashboard *(the website that replaces the demo)* (done)
 **Build:** SPA with signup, login, onboarding (key + copy-paste setup snippet), dashboard
 (decisions, incident timeline, stats), settings (keys, org). JWT auth from the browser.
 **Done when:** a stranger can sign up in the browser, get a key, and see their own (initially
@@ -319,14 +319,21 @@ opens PRs into the connected repo.
 **Done when:** a user logs in with GitHub, connects a repo, and a resolved crash yields a Fix Bot
 PR in that repo.
 
-### M5 — SigNoz-native experience *(the "money shot" — a thin slice IS built for the demo)*
-**Build for the demo (thin slice):** from a dashboard incident, deep-link into the SigNoz trace
+### ✅ M5 — SigNoz-native experience *(the "money shot" — thin slice, done)*
+**Built for the demo (thin slice):** from a dashboard incident, a deep-link into the SigNoz trace
 showing the crash→decision span link. This is the demo's climax and uses the SigNoz Cloud we
 already have.
-**Full milestone (roadmap):** guided OTel wiring for the customer runtime; render the span link
-in-product.
+**Full milestone (roadmap, not built):** guided OTel wiring for the customer runtime; render the
+span link in-product.
 **Done when (demo):** from a dashboard incident, one click lands on the exact linked trace in
-SigNoz.
+SigNoz. ✅ live-validated in SigNoz Cloud (in2).
+
+**Shipped after M0–M2/M5 landed, beyond this doc's original scope:** a 4th and 5th MCP tool
+(`postmortem`, `verify_provenance`), tamper-evident hash-chain provenance
+(`codeautopsy/provenance/integrity.py`), alerts-as-code closing the Auto-Heal loop
+(`alerts/alert-rules.json` → `/v1/heal/webhook`), mypy strict mode repo-wide, and pre-commit
+hooks + Dependabot. See `README.md` for the current, maintained feature list — treat this file
+as historical design rationale for M0–M5, not a live status tracker for anything shipped after.
 
 ### M7 — Hardening & scale *(roadmap slide — not built for the demo)*
 **Build:** Postgres Row-Level Security; rate limiting; audit logs; secret rotation; backups/DR;

@@ -4,6 +4,19 @@ Base commit: `c61150e1966ea197420d3c3ece4c5f2c69f4b439` (2026-07-26 02:23:43 +05
 uncommitted working-tree change (tamper-evidence hash chain + mandatory risk-source labeling,
 see §5) not yet pushed or deployed at the time of writing.
 
+> **Amendment (2026-07-26, later same day):** a follow-up thorough-testing pass actually opened
+> `alerts/alert-rules.json` and counted `dashboards/codeautopsy-blast-radius.json`'s panels
+> instead of recalling them from memory. §2's SigNoz judge section below originally said "only
+> one alert type" in a way that read as "only one alert rule" — corrected in place to "three
+> threshold rules, one alert type" (crash detection, incident-volume spike, decision-recording
+> dead-canary — all threshold, still no anomaly/log-based rules, so the underlying downgrade
+> risk stands). The dashboard's real panel count is 9 data panels (4 of its 13 widgets are row
+> headers, not panels) — README corrected from a stale "8" to 9. Also, that same pass found and
+> fixed a real bug the review process here didn't catch: `autopsy`/`postmortem` hung forever
+> under a real MCP client (stdin inheritance across 9 subprocess call sites) — see
+> `5052b59`. Worth noting as a limitation of this audit methodology itself: reading code
+> carefully still isn't the same as actually running it end-to-end through the real protocol.
+
 ## Methodology
 
 Borrowed from a competitor entry's ("GreenLight") self-audit practice: every finding below
@@ -48,10 +61,12 @@ distributed propagation; the Auto-Heal loop is triggered by a real SigNoz alert 
 a poller. Verified live: the provenance service's own `/health` shows real production data (9
 records), meaning the SigNoz telemetry describing it is describing something real, not a
 seeded demo fixture.
-**Downgrade risk:** only one alert type (threshold, on `codeautopsy.crashes`) exists. A
-competitor (AugmentLoop) ships anomaly-detection *and* log-based alerts alongside a threshold
-rule — a slow crash-rate creep that never crosses CodeAutopsy's fixed threshold currently goes
-undetected. Not fixed this session (scoped out as a bigger lift); recorded here rather than
+**Downgrade risk:** only one alert *type* exists — three threshold rules in
+`alerts/alert-rules.json` (crash detection → the Auto-Heal webhook, a provenance-service
+incident-volume spike, and a decision-recording pipeline "dead canary"), but no anomaly or
+log-based rules. A competitor (AugmentLoop) ships anomaly-detection *and* log-based alerts
+alongside a threshold rule — a slow crash-rate creep that never crosses CodeAutopsy's fixed
+threshold currently goes undetected. Not fixed this session (scoped out as a bigger lift); recorded here rather than
 silently left off the record.
 
 ### Creativity & Innovation judge

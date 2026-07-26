@@ -1,20 +1,25 @@
 # Next steps / pending tasks
 
-Working notes to resume from — last updated after commit `1a7066f` (main, pushed, CI green).
+Working notes to resume from — last updated after commit `1a7066f`. **Stale as of `5052b59`
+(13 commits ahead)**: since this was written, a 4th and 5th MCP tool (`postmortem`,
+`verify_provenance`) shipped, tamper-evident hash-chain provenance landed
+(`codeautopsy/provenance/integrity.py`), alerts-as-code closed the Auto-Heal loop, mypy strict
+mode was enabled repo-wide, and a real MCP-client hang bug was found and fixed. None of that is
+reflected below — treat this file as a historical snapshot, not a current pickup point. Current
+test count is 320 (was 296 when this file was written), not the number in "What's solid" below.
+
 If you're picking this back up cold: read the "What's solid" section first so you don't
 re-verify work that's already done, then work top-down through "Pending."
 
 ## Pending — needs your action (I can't do these myself)
 
-1. **Verify the distributed trace in SigNoz console.** Still the one open item — I don't have
-   console access to confirm this myself. Search Traces for `87db351fbc5cece02545065ea05f09c0`
-   (or just the most recent trace on `checkout-api`). Before that commit, this would've shown
-   as two *disconnected* traces (the crash span, and a separate unrelated trace for the
-   provenance service's own `/resolve` handling). It should now show as **one continuous
-   waterfall**: `parse_discount` → the HTTP call → `codeautopsy-provenance`'s `POST /resolve`
-   span, all under the same trace ID. I verified the propagation mechanism itself works
-   correctly (real local-HTTP-server test, not a fake) and the deploy succeeded — this is just
-   the visual confirmation in the console that only you can do.
+1. **Verify the distributed trace in SigNoz console.** *(Likely already resolved — this file's
+   own "What's solid" section below already lists distributed tracing as "confirmed live in
+   SigNoz Cloud with real data," which contradicts leaving this as open. Re-check the console
+   before spending time on it, it may just need this pending item deleted.)* Search Traces for
+   `87db351fbc5cece02545065ea05f09c0` (or the most recent trace on `checkout-api`) and confirm
+   `parse_discount` → the HTTP call → `codeautopsy-provenance`'s `POST /resolve` span all show
+   under one continuous trace ID, not two disconnected traces.
 
 2. **Decide on 5 leftover screenshot files**, not part of the repo:
    `D:\Aniket\SigNoz Hackathon\image.png`, `image copy.png`, `image copy 2.png`,

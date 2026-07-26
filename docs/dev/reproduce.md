@@ -20,6 +20,10 @@ curl -fsSL https://signoz.io/foundry.sh | bash    # installs foundryctl
 foundryctl cast -f casting.yaml                    # forges + deploys everything
 ```
 
+[`casting.yaml.lock`](../../casting.yaml.lock) is committed alongside it — `forge` writes it from
+checksums of the rendered deployment, pinning the exact resolved config so a re-`cast` reproduces
+the same deployment rather than whatever `casting.yaml`'s templates happen to resolve to later.
+
 This brings up:
 
 | Service | Where |

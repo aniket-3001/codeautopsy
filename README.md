@@ -12,14 +12,14 @@ so it fixes itself.
 Built for the **WeMakeDevs × SigNoz** hackathon — Track 3, Agents of SigNoz.
 
 <p>
-  <a href="https://aniket-3001.github.io/codeautopsy/"><img src="https://img.shields.io/badge/live%20demo-online-14b8a6?style=for-the-badge" height="28" alt="Live demo"/></a>
-  <a href="https://aniket-3001.github.io/codeautopsy/demo.html"><img src="https://img.shields.io/badge/sandbox-try%20it%20live-6366f1?style=for-the-badge" height="28" alt="Sandbox demo"/></a>
+  <a href="https://aniket-3001.github.io/codeautopsy/app.html"><img src="https://img.shields.io/badge/live%20app-open%20it-14b8a6?style=for-the-badge" height="28" alt="Live app"/></a>
+  <a href="https://aniket-3001.github.io/codeautopsy/"><img src="https://img.shields.io/badge/overview-landing%20page-6366f1?style=for-the-badge" height="28" alt="Landing page"/></a>
   <a href="https://github.com/aniket-3001/codeautopsy/actions/workflows/ci.yml"><img src="https://github.com/aniket-3001/codeautopsy/actions/workflows/ci.yml/badge.svg" height="28" alt="CI"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" height="28" alt="MIT License"/></a>
 </p>
 
 <p>
-  <img src="https://img.shields.io/badge/tests-307%20passing-22c55e?style=flat-square" alt="307 tests passing"/>
+  <img src="https://img.shields.io/badge/tests-320%20passing-22c55e?style=flat-square" alt="320 tests passing"/>
   <img src="https://img.shields.io/badge/coverage-%E2%89%A595%25-22d3ee?style=flat-square" alt="Coverage ≥95%"/>
   <img src="https://img.shields.io/badge/OpenTelemetry-traces%20%C2%B7%20metrics%20%C2%B7%20logs-000000?style=flat-square&logo=opentelemetry&logoColor=white" alt="OpenTelemetry"/>
   <img src="https://img.shields.io/badge/SigNoz-Cloud-E75536?style=flat-square" alt="SigNoz Cloud"/>
@@ -29,8 +29,8 @@ Built for the **WeMakeDevs × SigNoz** hackathon — Track 3, Agents of SigNoz.
   <img src="https://img.shields.io/badge/quality-ruff%20%C2%B7%20mypy%20%C2%B7%20pytest-261230?style=flat-square" alt="Quality"/>
 </p>
 
-[**Live demo**](https://aniket-3001.github.io/codeautopsy/) ·
-[Sandbox](https://aniket-3001.github.io/codeautopsy/demo.html) ·
+[**Live app**](https://aniket-3001.github.io/codeautopsy/app.html) ·
+[Landing page](https://aniket-3001.github.io/codeautopsy/) ·
 [See it in action](#see-it-in-action) ·
 [How it works](#the-one-trick) ·
 [SigNoz coverage](#signoz-feature-coverage) ·
@@ -81,8 +81,8 @@ AI decision span that wrote it, including the reasoning the agent gave at the ti
 span link is what turns "here's a stack trace" into "here's the ten words of reasoning
 that caused it."
 
-**Live:** [landing page](https://aniket-3001.github.io/codeautopsy/) ·
-[**try the sandbox demo**](https://aniket-3001.github.io/codeautopsy/demo.html) ·
+**Live:** [**the app**](https://aniket-3001.github.io/codeautopsy/app.html) — sign up,
+resolve a real crash, watch Auto-Heal · [landing page](https://aniket-3001.github.io/codeautopsy/) ·
 [sample app](https://codeautopsy-sample-app-182653908302.us-central1.run.app/health) ·
 [provenance API](https://codeautopsy-provenance-182653908302.us-central1.run.app/health)
 
@@ -129,7 +129,10 @@ that caused it."
   W3C `Codeautopsy-Traceparent` trailer (`provenance/trailers.py`), so provenance survives
   a dropped database and travels with the code in `git log` forever.
 - **Coroner CLI** — `codeautopsy autopsy` resolves a crash to its decision; `codeautopsy
-  report` renders the *full* chain of custody as a shareable markdown postmortem.
+  report` renders the *full* chain of custody as a shareable markdown postmortem;
+  `codeautopsy status` shows the local store + config at a glance; `codeautopsy provenance`
+  recovers a commit's provenance from its git trailers alone, no store needed; `codeautopsy
+  index-commit` binds pending edit-time decisions to a commit right after you make it.
 - **Fix Bot** — hands the agent its own genealogy, verifies the patch with a real
   regression test *before* committing anything, opens a PR. The loop stops at the PR — a
   human always merges (see [governance](docs/dev/governance.md)).
@@ -164,7 +167,7 @@ does a distinct, load-bearing job in the product — not a checkbox integration:
 | **Custom metrics** | `codeautopsy.crashes` (`sample_app/main.py`), `codeautopsy.decisions.indexed` + `codeautopsy.incidents` (`provenance/service.py`) | `codeautopsy.crashes` is what the Auto-Heal alert rule watches. The two provenance-service counters make ingest volume and resolution outcome queryable independent of any single trace. |
 | **Logs, trace-correlated** | `enricher/core.py::_emit_autopsy_log` | The AI's own reasoning is emitted as a log record carrying the *same* trace/span id as the autopsy span — so "why did this crash" is filterable as a SigNoz log line, not something you have to open a trace to read, and SigNoz's own trace-to-correlated-logs jump works on it for free. |
 | **Alerts as code** | [`alerts/alert-rules.json`](alerts/alert-rules.json) — versioned in the repo, not clicked together in the UI — on `codeautopsy.crashes` → `POST /v1/heal/webhook` (see `docs/dev/operations.md`) | Closes the Auto-Heal loop (L4): a real SigNoz alert — not a poller — is what triggers the Fix Bot with zero human in the loop. |
-| **Dashboards** | [`dashboards/codeautopsy-blast-radius.json`](dashboards/codeautopsy-blast-radius.json) — 8 panels across traces, spanning overview stats, time series, a risk-flag leaderboard, and a live unresolved-crash queue | One click from the web app (`Blast Radius in SigNoz 🔍`) into a dashboard built entirely from `codeautopsy.autopsy` span attributes. |
+| **Dashboards** | [`dashboards/codeautopsy-blast-radius.json`](dashboards/codeautopsy-blast-radius.json) — 9 panels across traces, spanning overview stats, time series, a risk-flag leaderboard, and a live unresolved-crash queue | One click from the web app (`Blast Radius in SigNoz 🔍`) into a dashboard built entirely from `codeautopsy.autopsy` span attributes. |
 | **MCP — emitting, not just consuming** | `codeautopsy/mcp/server.py` | The inverse of "agent queries SigNoz's MCP server": CodeAutopsy *is* an MCP server, exposing `autopsy`/`prognose`/`postmortem`/`leaderboard`/`verify_provenance` as agent-callable tools over the provenance index SigNoz's own MCP server has no way to know about. |
 | **Both services traced** | `sample_app/main.py` **and** `provenance/service.py` (`FastAPIInstrumentor`) | The dashboard/API backend isn't a silent, unobserved control plane — it's a first-class instrumented service in the same SigNoz Cloud tenant as the sample app. |
 | **Distributed tracing** | `HTTPXClientInstrumentor` (both services) | The enricher's HTTP call from `checkout-api` to `codeautopsy-provenance` propagates W3C `traceparent` context — SigNoz sees one connected distributed trace (`parse_discount` → HTTP call → the provenance service's own `/resolve` span) instead of two unrelated ones, on top of the explicit span *link* the core thesis already relies on. |
@@ -296,7 +299,7 @@ The server reads the developer's **own** local provenance index (SQLite, or Post
 | MCP | `mcp` (official Python SDK) — `codeautopsy-mcp` exposes tools over stdio |
 | Frontend | Static HTML + vanilla JS, **no build step**, Tailwind CDN — deployed as-is to GitHub Pages |
 | Frontend tests | Playwright — drives the real `docs/*.html` files unmodified, `fetch()` mocked |
-| Quality | ruff · mypy · pytest (307 tests, ≥95% coverage gate) · GitHub Actions CI |
+| Quality | ruff · mypy · pytest (320 tests, ≥95% coverage gate) · GitHub Actions CI |
 | Deploy | Docker · Google Cloud Run · Cloud SQL (Postgres) · GHCR · GitHub Pages · Workload Identity Federation (no long-lived keys) |
 
 ## Quickstart
