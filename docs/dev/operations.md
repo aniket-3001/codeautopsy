@@ -25,8 +25,9 @@ codeautopsy-mcp                  # MCP server over stdio (needs the `.[mcp]` ext
 ### MCP server (`codeautopsy/mcp/`)
 
 CodeAutopsy *is* an MCP server — the inverse of the entries that consume SigNoz's MCP. It exposes
-three agent-callable tools (`autopsy`, `prognose`, `leaderboard`) over stdio, each reading the
-local provenance store (SQLite by default; Postgres when `DATABASE_URL` is set).
+five agent-callable tools (`autopsy`, `prognose`, `postmortem`, `leaderboard`,
+`verify_provenance`) over stdio, each reading the local provenance store (SQLite by default;
+Postgres when `DATABASE_URL` is set).
 
 ```bash
 pip install -e ".[mcp]"          # the `mcp` package is an optional extra

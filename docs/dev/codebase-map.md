@@ -14,7 +14,7 @@ below serves that join. Keep it boring; keep it reliable.
 | `accounts/` | Multi-tenant SaaS: `models.py`, `store.py`/`store_postgres.py` (users, orgs, memberships, API keys), `security.py` (argon2 hashing, JWT), `auth.py` (`make_require_user`, `make_require_api_key` FastAPI deps). |
 | `enricher/` | Runtime half. `core.py` = `autopsy_exception()` (mints the linked autopsy span on a crash) + `resolve_decision()`. `incidents.py` = local incident log (`.codeautopsy/incidents.jsonl`) the Fix Bot reads. |
 | `fixbot/` | `core.py` `run_fixbot()` — assembles genealogy, calls an LLM (Groq, free tier) via forced tool-use for a structured patch, **runs a regression test as a real subprocess before committing**, commits on a `codeautopsy/fix-<id>` branch. `--push` opens a PR via `gh`. |
-| `cli/main.py` | The Coroner CLI (typer). Commands: `autopsy`, `fix`, `index-commit`, `record`, `status`. |
+| `cli/main.py` | The Coroner CLI (typer). Commands: `autopsy`, `provenance`, `lessons`, `recall`, `report`, `fix`, `prognose`, `index-commit`, `record`, `status`. |
 | `sample_app/main.py` | A deliberately-buggy checkout API used to demo a live crash. |
 
 ## Frontend (`docs/`)

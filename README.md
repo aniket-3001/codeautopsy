@@ -19,7 +19,7 @@ Built for the **WeMakeDevs × SigNoz** hackathon — Track 3, Agents of SigNoz.
 </p>
 
 <p>
-  <img src="https://img.shields.io/badge/tests-296%20passing-22c55e?style=flat-square" alt="296 tests passing"/>
+  <img src="https://img.shields.io/badge/tests-307%20passing-22c55e?style=flat-square" alt="307 tests passing"/>
   <img src="https://img.shields.io/badge/coverage-%E2%89%A595%25-22d3ee?style=flat-square" alt="Coverage ≥95%"/>
   <img src="https://img.shields.io/badge/OpenTelemetry-traces%20%C2%B7%20metrics%20%C2%B7%20logs-000000?style=flat-square&logo=opentelemetry&logoColor=white" alt="OpenTelemetry"/>
   <img src="https://img.shields.io/badge/SigNoz-Cloud-E75536?style=flat-square" alt="SigNoz Cloud"/>
@@ -117,14 +117,25 @@ that caused it."
 - **Span-link autopsy** — one click in SigNoz jumps from a runtime crash trace to the
   dev-time decision trace that authored the crashing line. Validated on real infra
   (`scripts/day0_smoke.py`).
+- **Attribution confidence** — every resolved autopsy carries a 0–1 confidence score
+  (`provenance/confidence.py`) folding *how* the decision was matched (exact commit vs. a
+  `git blame` walk) and *how specific* its line range is into one honest high/medium/low
+  label — no resolution is presented as more certain than it actually is.
 - **Provenance recorder** — a real Claude Code `PostToolUse` hook captures every AI
   edit as a decision span, with reasoning and heuristic risk flags, agent-agnostic (works
-  from any tool via `codeautopsy record`).
+  from any tool via `codeautopsy record`), each flag labeled with a mandatory, closed
+  `risk_source` (`heuristic` today — never silently blendable with a future AI-judged signal).
+- **Git trailers** — every Fix Bot commit is stamped with `Codeautopsy-Decision-Id` and a
+  W3C `Codeautopsy-Traceparent` trailer (`provenance/trailers.py`), so provenance survives
+  a dropped database and travels with the code in `git log` forever.
 - **Coroner CLI** — `codeautopsy autopsy` resolves a crash to its decision; `codeautopsy
   report` renders the *full* chain of custody as a shareable markdown postmortem.
 - **Fix Bot** — hands the agent its own genealogy, verifies the patch with a real
   regression test *before* committing anything, opens a PR. The loop stops at the PR — a
   human always merges (see [governance](docs/dev/governance.md)).
+- **Lessons memory** — a verified fix's lesson is fingerprinted by bug *class* (not exact
+  values), persisted, and instantly replayed on recurrence — a pure store read, zero LLM
+  calls (`codeautopsy lessons` / `codeautopsy recall`).
 - **Auto-Heal (L4)** — a real SigNoz alert on `codeautopsy.crashes` — not a poller —
   fires a webhook that drives the Fix Bot with zero human in the loop, live on the
   dashboard.
@@ -132,9 +143,13 @@ that caused it."
   production crash history — same engine as the CI PR-comment bot.
 - **Leaderboard** — rank AI tools/models by real, measured crash rate. Not a benchmark
   score — production outcomes.
-- **MCP server** — CodeAutopsy *is* an MCP server (`autopsy`/`prognose`/`leaderboard`
-  as agent-callable tools), the inverse of most entries in this hackathon, which only
-  *consume* SigNoz's MCP server.
+- **MCP server** — CodeAutopsy *is* an MCP server (`autopsy`/`prognose`/`postmortem`/
+  `leaderboard`/`verify_provenance` as agent-callable tools), the inverse of most entries
+  in this hackathon, which only *consume* SigNoz's MCP server.
+- **Tamper-evident provenance** — every decision record is hash-chained (sha256, each
+  record commits to its own content plus the previous record's hash); `verify_provenance`
+  recomputes the chain on demand and flags the exact record if one was ever altered after
+  it was written. Chain-of-custody, made falsifiable — not just a phrase in a README.
 - **Multi-tenant SaaS** — org-scoped accounts, API keys, JWT sessions, a full web
   dashboard — not just a CLI demo.
 
@@ -148,9 +163,9 @@ does a distinct, load-bearing job in the product — not a checkbox integration:
 | **Traces + span links** | `codeautopsy/enricher/core.py` (`codeautopsy.autopsy` span) | The core thesis: an OTel span link jumps a runtime crash trace to the dev-time decision trace that authored the crashing line. Validated on real SigNoz Cloud infra (`scripts/day0_smoke.py`). Every such span also carries `deployment.ci_run_url` — the GitHub Actions run that built and deployed the crashing revision — extending the chain one hop past the commit: *reasoning → commit → CI run → deployed revision*. |
 | **Custom metrics** | `codeautopsy.crashes` (`sample_app/main.py`), `codeautopsy.decisions.indexed` + `codeautopsy.incidents` (`provenance/service.py`) | `codeautopsy.crashes` is what the Auto-Heal alert rule watches. The two provenance-service counters make ingest volume and resolution outcome queryable independent of any single trace. |
 | **Logs, trace-correlated** | `enricher/core.py::_emit_autopsy_log` | The AI's own reasoning is emitted as a log record carrying the *same* trace/span id as the autopsy span — so "why did this crash" is filterable as a SigNoz log line, not something you have to open a trace to read, and SigNoz's own trace-to-correlated-logs jump works on it for free. |
-| **Alerts → webhook** | Alert rule on `codeautopsy.crashes` → `POST /v1/heal/webhook` (see `docs/dev/operations.md`) | Closes the Auto-Heal loop (L4): a real SigNoz alert — not a poller — is what triggers the Fix Bot with zero human in the loop. |
+| **Alerts as code** | [`alerts/alert-rules.json`](alerts/alert-rules.json) — versioned in the repo, not clicked together in the UI — on `codeautopsy.crashes` → `POST /v1/heal/webhook` (see `docs/dev/operations.md`) | Closes the Auto-Heal loop (L4): a real SigNoz alert — not a poller — is what triggers the Fix Bot with zero human in the loop. |
 | **Dashboards** | [`dashboards/codeautopsy-blast-radius.json`](dashboards/codeautopsy-blast-radius.json) — 8 panels across traces, spanning overview stats, time series, a risk-flag leaderboard, and a live unresolved-crash queue | One click from the web app (`Blast Radius in SigNoz 🔍`) into a dashboard built entirely from `codeautopsy.autopsy` span attributes. |
-| **MCP — emitting, not just consuming** | `codeautopsy/mcp/server.py` | The inverse of "agent queries SigNoz's MCP server": CodeAutopsy *is* an MCP server, exposing `autopsy`/`prognose`/`leaderboard` as agent-callable tools over the provenance index SigNoz's own MCP server has no way to know about. |
+| **MCP — emitting, not just consuming** | `codeautopsy/mcp/server.py` | The inverse of "agent queries SigNoz's MCP server": CodeAutopsy *is* an MCP server, exposing `autopsy`/`prognose`/`postmortem`/`leaderboard`/`verify_provenance` as agent-callable tools over the provenance index SigNoz's own MCP server has no way to know about. |
 | **Both services traced** | `sample_app/main.py` **and** `provenance/service.py` (`FastAPIInstrumentor`) | The dashboard/API backend isn't a silent, unobserved control plane — it's a first-class instrumented service in the same SigNoz Cloud tenant as the sample app. |
 | **Distributed tracing** | `HTTPXClientInstrumentor` (both services) | The enricher's HTTP call from `checkout-api` to `codeautopsy-provenance` propagates W3C `traceparent` context — SigNoz sees one connected distributed trace (`parse_discount` → HTTP call → the provenance service's own `/resolve` span) instead of two unrelated ones, on top of the explicit span *link* the core thesis already relies on. |
 | **Service Map / APM** | Free from `FastAPIInstrumentor` on both services | p50/p99 latency, error rate, and request rate per service and per route — no extra code, a byproduct of the tracing above. |
@@ -229,7 +244,7 @@ talks to the provenance service directly from the browser.
 | Fix Bot | `codeautopsy/fixbot/` | `codeautopsy fix <trace>` — patch, verify, commit, PR |
 | Auto-Heal | `codeautopsy/autoheal/` | SigNoz alert → webhook → Fix Bot, live timeline on the dashboard |
 | Reliability | `codeautopsy/reliability/` | Prognosis (risk-gate) + leaderboard scoring, priced against real crash history |
-| MCP server | `codeautopsy/mcp/` | `codeautopsy-mcp` — exposes `autopsy`/`prognose`/`leaderboard` as agent-callable tools, each one a span |
+| MCP server | `codeautopsy/mcp/` | `codeautopsy-mcp` — exposes `autopsy`/`prognose`/`postmortem`/`leaderboard`/`verify_provenance` as agent-callable tools, each one a span |
 | Accounts | `codeautopsy/accounts/` | Org/user signup, JWT sessions, API keys — the multi-tenant SaaS layer |
 
 ## MCP server — CodeAutopsy as agent-callable tools
@@ -237,13 +252,15 @@ talks to the provenance service directly from the browser.
 Most Agents-of-SigNoz projects *consume* SigNoz's MCP server so their agent can read telemetry.
 CodeAutopsy points the plug the other way: it **is** an MCP server, exposing the one thing only
 CodeAutopsy knows — the map from a crashing line back to the AI decision that authored it — so any
-MCP client (Cursor, Claude Desktop, an IDE) gets three tools on its menu:
+MCP client (Cursor, Claude Desktop, an IDE) gets five tools on its menu:
 
 | Tool | Question it answers |
 |---|---|
 | `autopsy(commit, file, line)` | Which AI coding decision authored this crashing line? |
 | `prognose(code)` | What's this snippet's risk, priced against real crash history? |
+| `postmortem(commit, file, line)` | Render the full chain of custody as a shareable markdown case file. |
 | `leaderboard()` | Which AI tools/models crash most in production? |
+| `verify_provenance()` | Has any decision record been altered since it was written? A sha256 hash chain over the provenance store, recomputed and compared on demand. |
 
 Every call is itself a span (`codeautopsy.mcp.*`) in the same SigNoz pipeline the rest of
 the product exports to — dogfooding, not just an integration.
@@ -279,7 +296,7 @@ The server reads the developer's **own** local provenance index (SQLite, or Post
 | MCP | `mcp` (official Python SDK) — `codeautopsy-mcp` exposes tools over stdio |
 | Frontend | Static HTML + vanilla JS, **no build step**, Tailwind CDN — deployed as-is to GitHub Pages |
 | Frontend tests | Playwright — drives the real `docs/*.html` files unmodified, `fetch()` mocked |
-| Quality | ruff · mypy · pytest (296 tests, ≥95% coverage gate) · GitHub Actions CI |
+| Quality | ruff · mypy · pytest (307 tests, ≥95% coverage gate) · GitHub Actions CI |
 | Deploy | Docker · Google Cloud Run · Cloud SQL (Postgres) · GHCR · GitHub Pages · Workload Identity Federation (no long-lived keys) |
 
 ## Quickstart
