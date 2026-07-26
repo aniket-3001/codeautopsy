@@ -96,19 +96,19 @@ resolve a real crash, watch Auto-Heal · [landing page](https://aniket-3001.gith
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="docs/assets/shot-landing.svg" width="100%" alt="Landing page placeholder"/><br/><sub><b>Landing page</b> — hero, mechanism diagram, CTAs</sub></td>
-<td width="50%" align="center"><img src="docs/assets/shot-dashboard.svg" width="100%" alt="Dashboard placeholder"/><br/><sub><b>Dashboard</b> — stat cards, resolve-rate ring, risk-flag bars</sub></td>
+<td width="50%" align="center"><img src="docs/assets/landing.png" width="100%" alt="Landing page"/><br/><sub><b>Landing page</b> — hero, mechanism diagram, CTAs</sub></td>
+<td width="50%" align="center"><img src="docs/assets/dashboard.png" width="100%" alt="Dashboard"/><br/><sub><b>Dashboard</b> — stat cards, resolve-rate ring, risk-flag bars</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="docs/assets/shot-live-autopsy.svg" width="100%" alt="Live Autopsy playground placeholder"/><br/><sub><b>Live Autopsy playground</b> — index a decision, simulate a crash, watch it resolve</sub></td>
-<td width="50%" align="center"><img src="docs/assets/shot-demo.svg" width="100%" alt="Sandbox demo placeholder"/><br/><sub><b>Sandbox demo</b> — the 3-step crash → confess → resolve loop, against real infra</sub></td>
+<td width="50%" align="center"><img src="docs/assets/autopsy.png" width="100%" alt="Live Autopsy playground"/><br/><sub><b>Live Autopsy playground</b> — index a decision, simulate a crash, watch it resolve</sub></td>
+<td width="50%" align="center"><img src="docs/assets/demo.png" width="100%" alt="Sandbox demo"/><br/><sub><b>Sandbox demo</b> — the 3-step crash → confess → resolve loop, against real infra</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="docs/assets/shot-leaderboard.svg" width="100%" alt="Leaderboard placeholder"/><br/><sub><b>Leaderboard</b> — AI tools/models ranked by real crash rate</sub></td>
-<td width="50%" align="center"><img src="docs/assets/shot-risk-gate.svg" width="100%" alt="Risk Gate placeholder"/><br/><sub><b>Risk Gate</b> — price a pasted snippet against production history</sub></td>
+<td width="50%" align="center"><img src="docs/assets/leaderboard.png" width="100%" alt="Leaderboard"/><br/><sub><b>Leaderboard</b> — AI tools/models ranked by real crash rate</sub></td>
+<td width="50%" align="center"><img src="docs/assets/risk_gate.png" width="100%" alt="Risk Gate"/><br/><sub><b>Risk Gate</b> — price a pasted snippet against production history</sub></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="docs/assets/shot-autoheal.svg" width="70%" alt="Auto-Heal placeholder"/><br/><sub><b>Auto-Heal</b> — a SigNoz alert triggers the Fix Bot; watch the run timeline live</sub></td>
+<td colspan="2" align="center"><img src="docs/assets/autoheal.png" width="70%" alt="Auto-Heal"/><br/><sub><b>Auto-Heal</b> — a SigNoz alert triggers the Fix Bot; watch the run timeline live</sub></td>
 </tr>
 </table>
 
