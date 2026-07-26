@@ -51,6 +51,7 @@ def _deployed_commit_sha() -> str:
             text=True,
             cwd=REPO_ROOT,
             check=True,
+            stdin=subprocess.DEVNULL,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"

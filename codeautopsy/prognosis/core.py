@@ -30,7 +30,11 @@ class PrognosisError(RuntimeError):
 
 
 def _git(repo: str | Path, *args: str) -> str:
-    proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    # stdin=DEVNULL: runs unattended in CI (the prognosis.yml PR-comment bot) and under the
+    # MCP server — a git process inheriting an open, unfed stdin hangs forever.
+    proc = subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, stdin=subprocess.DEVNULL
+    )
     if proc.returncode != 0:
         raise PrognosisError(proc.stderr.strip() or f"git {' '.join(args)} failed")
     return proc.stdout
@@ -251,7 +255,9 @@ def post_comment(repo_root: str | Path, body: str, pr: str | None = None) -> str
         args.append(pr)
     args += ["--body", body]
     try:
-        proc = subprocess.run(args, cwd=str(repo_root), capture_output=True, text=True)
+        proc = subprocess.run(
+            args, cwd=str(repo_root), capture_output=True, text=True, stdin=subprocess.DEVNULL
+        )
     except FileNotFoundError:
         return None
     if proc.returncode != 0:

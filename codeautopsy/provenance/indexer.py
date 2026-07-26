@@ -21,10 +21,15 @@ class GitError(RuntimeError):
 
 
 def _git(repo: str | Path, *args: str) -> str:
+    # stdin=DEVNULL: without it, git inherits the caller's stdin. Under the MCP server
+    # that's the JSON-RPC pipe from the client, not a terminal — a git process holding that
+    # handle open hangs the tool call forever with no way to recover (found via a real MCP
+    # protocol test, not a mock).
     proc = subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
     if proc.returncode != 0:
         raise GitError(proc.stderr.strip() or f"git {' '.join(args)} failed")

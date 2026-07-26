@@ -36,8 +36,11 @@ class FixBotError(RuntimeError):
 
 
 def _git(repo: str | Path, *args: str) -> str:
+    # stdin=DEVNULL: Fix Bot runs unattended (Auto-Heal has zero human in the loop) — a git
+    # process that inherits an open, unfed stdin (e.g. the MCP server's JSON-RPC pipe) hangs
+    # forever with nothing able to unblock it.
     proc = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, stdin=subprocess.DEVNULL
     )
     if proc.returncode != 0:
         raise FixBotError(proc.stderr.strip() or f"git {' '.join(args)} failed")
@@ -74,6 +77,7 @@ def build_genealogy(
         context=(incident or {}).get("context", {}),
         confidence=resolution.confidence,
         confidence_factors=resolution.confidence_factors,
+        resolve_detail="" if resolution.resolved else resolution.detail,
     )
 
 
@@ -285,6 +289,7 @@ def run_regression_test(repo_root: Path, test_file_rel: str) -> tuple[bool, str]
         cwd=str(repo_root),
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
     output = (proc.stdout + proc.stderr).strip()
     return proc.returncode == 0, output[-4000:]
@@ -331,6 +336,7 @@ def open_pull_request(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
         )
         if proc.returncode != 0:
             return None

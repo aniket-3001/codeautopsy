@@ -81,6 +81,26 @@ def test_render_postmortem_unresolved_degrades_gracefully():
     assert "No lesson recorded yet" in md
 
 
+def test_render_postmortem_unresolved_surfaces_service_unreachable_distinctly():
+    """A resolution that failed because the provenance service itself was unreachable must
+    render differently from a genuine "nothing indexed" — the two currently arrive through
+    the same `resolved: false` shape, and only `resolve_detail` tells them apart. Silently
+    rendering the generic message for both would hide a real outage behind a plausible-looking
+    "no decision found" — exactly the failure mode a live demo can least afford."""
+    genealogy = Genealogy(
+        file_path="app/other.py",
+        line=9,
+        commit_sha="deadbeef",
+        file_content="x = 1\n",
+        resolve_detail="provenance service unreachable: Connection refused",
+    )
+
+    md = render_postmortem(genealogy)
+
+    assert "Could not resolve: provenance service unreachable: Connection refused" in md
+    assert "No decision indexed for this line" not in md
+
+
 def test_render_postmortem_confidence_omitted_when_none():
     genealogy = _resolved_genealogy(confidence=None, confidence_factors=None)
 

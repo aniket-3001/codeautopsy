@@ -22,6 +22,7 @@ def head_sha(repo_root: Path) -> str:
         capture_output=True,
         text=True,
         check=True,
+        stdin=subprocess.DEVNULL,
     ).stdout.strip()
 
 

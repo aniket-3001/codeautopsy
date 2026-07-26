@@ -56,6 +56,16 @@ def render_postmortem(
 **Risk flags at write-time:** {", ".join(genealogy.risk_flags) or "none"}{confidence_line}
 **Dev-time trace:** `{genealogy.decision_trace_id}`
 **Dev-time span:** `{genealogy.decision_span_id}`"""
+    elif genealogy.resolve_detail:
+        # resolve_detail carries the provenance service's own reason the resolution came back
+        # empty — e.g. "provenance service unreachable: ..." reads very differently from "no
+        # matching provenance and no repo to blame," and a reader should be able to tell a
+        # real outage apart from a legitimate no-match instead of seeing the same generic
+        # message for both.
+        reasoning_section = (
+            "## The AI's original reasoning\n\n"
+            f"_Could not resolve: {genealogy.resolve_detail}._"
+        )
     else:
         reasoning_section = (
             "## The AI's original reasoning\n\n"

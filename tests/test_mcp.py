@@ -243,7 +243,11 @@ def test_postmortem_renders_when_unresolved_and_no_lesson(
     )
 
     markdown = out["markdown"]
-    assert "No decision indexed for this line" in markdown
+    # The mocked ResolveResponse carries a real `detail` ("no matching decision indexed"),
+    # so the rendered postmortem should surface it verbatim rather than fall back to the
+    # generic message — a reader should be able to tell "we checked and found nothing" apart
+    # from "the provenance service was unreachable," and both currently arrive via `detail`.
+    assert "Could not resolve: no matching decision indexed" in markdown
     assert "No lesson recorded yet for this class of bug" in markdown
 
 

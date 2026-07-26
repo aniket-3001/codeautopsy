@@ -109,6 +109,7 @@ def read_commit_trailers(repo: str | Path, commit_sha: str) -> dict[str, str]:
         ["git", "-C", str(repo), "log", "-1", "--format=%B", commit_sha],
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
     if proc.returncode != 0:
         return {}

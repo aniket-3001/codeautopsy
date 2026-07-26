@@ -35,6 +35,12 @@ class Genealogy(BaseModel):
     # unresolved. Not used by the Fix Bot's own prompt; carried for codeautopsy report.
     confidence: float | None = None
     confidence_factors: dict[str, Any] | None = None
+    # Why resolution came back empty, straight from the provenance service's own
+    # ResolveResponse.detail — distinguishes a genuine "nothing indexed for this line" from
+    # "the provenance service was unreachable," which otherwise render identically to a
+    # reader and can hide a real outage behind a plausible-looking "no decision found."
+    # Empty when resolved (nothing to explain) or when the call didn't run at all.
+    resolve_detail: str = ""
 
 
 class FixProposal(BaseModel):
