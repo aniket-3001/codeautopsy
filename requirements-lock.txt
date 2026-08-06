@@ -4,7 +4,7 @@
 #
 #    pip-compile --extra=dev --extra=fixbot --extra=mcp --output-file=requirements-lock.txt pyproject.toml
 #
-annotated-doc==0.0.4
+annotated-doc==0.0.5
     # via
     #   fastapi
     #   typer
@@ -48,13 +48,13 @@ colorama==0.4.6
     #   click
     #   pytest
     #   typer
-coverage[toml]==7.15.2
+coverage[toml]==7.15.3
     # via pytest-cov
-cryptography==49.0.0
+cryptography==50.0.0
     # via pyjwt
 distro==1.9.0
     # via groq
-fastapi==0.140.0
+fastapi==0.141.1
     # via codeautopsy (pyproject.toml)
 googleapis-common-protos==1.75.0
     # via opentelemetry-exporter-otlp-proto-http
@@ -90,7 +90,7 @@ librt==0.13.0
     # via mypy
 markdown-it-py==4.2.0
     # via rich
-mcp==1.28.1
+mcp==2.0.0
     # via codeautopsy (pyproject.toml)
 mdurl==0.1.2
     # via markdown-it-py
@@ -170,7 +170,7 @@ pydantic==2.13.4
     #   groq
     #   mcp
     #   pydantic-settings
-pydantic-core==2.46.4
+pydantic-core==2.47.0
     # via pydantic
 pydantic-settings==2.14.2
     # via
@@ -217,7 +217,7 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
-ruff==0.16.0
+ruff==0.16.1
     # via codeautopsy (pyproject.toml)
 shellingham==1.5.4
     # via typer
@@ -260,15 +260,15 @@ tzdata==2026.3
     # via psycopg
 urllib3==2.7.0
     # via requests
-uvicorn[standard]==0.51.0
+uvicorn[standard]==0.52.1
     # via
     #   codeautopsy (pyproject.toml)
     #   mcp
 watchfiles==1.2.0
     # via uvicorn
-websockets==16.1.1
+websockets==17.0.1
     # via uvicorn
-wrapt==2.2.2
+wrapt==2.3.0
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-httpx
