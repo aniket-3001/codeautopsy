@@ -21,11 +21,11 @@ jobs:
       HEAL_CALLBACK_URL: ${{ github.event.client_payload.callback_url }}
       HEAL_WEBHOOK_SECRET: ${{ secrets.HEAL_WEBHOOK_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history — the Fix Bot resolves the crashing line back through blame
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
